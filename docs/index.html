@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#071529">
+  <meta name="description" content="小淇的双周工作记录、成果提交与复盘成长站。">
+  <title>QQ淇的大二实习逆袭之路</title>
+  <style>
+    :root{--navy:#071529;--panel:#0d2139;--panel2:#102944;--blue:#267cff;--cyan:#21dbae;--ice:#f6fbff;--muted:#91a8c0}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--navy);color:var(--ice);font-family:Inter,"Segoe UI","Microsoft YaHei UI",sans-serif}button,input,textarea{font:inherit}button,a{-webkit-tap-highlight-color:transparent}a{color:inherit;text-decoration:none}
+    main{min-height:100vh;overflow:hidden;position:relative;background:radial-gradient(circle at 78% 12%,rgba(33,219,174,.14),transparent 24%),linear-gradient(145deg,#071529 0%,#071a31 50%,#05111f 100%)}
+    .energy{position:absolute;width:420px;height:900px;border:1px solid rgba(38,124,255,.13);transform:rotate(34deg);pointer-events:none}.energy.one{right:-120px;top:-320px;box-shadow:0 0 80px rgba(33,219,174,.08)}.energy.two{left:-330px;top:580px}
+    .nav,.hero,.stats,.workspace,footer{width:min(1380px,calc(100% - 48px));margin-inline:auto;position:relative;z-index:1}.nav{height:92px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(145,168,192,.16)}
+    .brand{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:.02em}.brand span{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;color:#04131f;background:linear-gradient(135deg,var(--cyan),#85ffd7);box-shadow:0 0 28px rgba(33,219,174,.25)}
+    .nav-links{display:flex;gap:34px;color:#a8bdd1;font-size:14px}.nav-links a:hover{color:var(--cyan)}.ghost{color:#d9e8f5;background:rgba(255,255,255,.035);border:1px solid rgba(145,168,192,.25);padding:11px 17px;border-radius:11px;cursor:pointer}
+    .hero{min-height:590px;display:grid;grid-template-columns:1.25fr .75fr;align-items:center;gap:80px;padding:70px 0 45px}.eyebrow,.heading p{color:var(--cyan);font-size:12px;font-weight:800;letter-spacing:.2em}.eyebrow i{display:inline-block;width:28px;height:2px;margin:0 8px 3px 0;background:var(--cyan)}
+    h1{margin:20px 0;font-size:clamp(52px,6vw,88px);line-height:1.02;letter-spacing:-.06em}h1 em{font-style:normal;color:transparent;-webkit-text-stroke:1px #a9d8ff;text-shadow:0 0 40px rgba(38,124,255,.18)}.hero-copy{max-width:650px;color:#9fb3c7;font-size:18px;line-height:1.9}
+    .primary,.submit{display:inline-flex;align-items:center;justify-content:center;gap:36px;margin-top:24px;padding:16px 22px;color:#04131f;background:linear-gradient(115deg,var(--cyan),#6bfbd1);border:0;border-radius:12px;font-weight:900;box-shadow:0 12px 32px rgba(33,219,174,.18);transition:.2s ease;cursor:pointer}.primary:hover,.submit:hover{transform:translateY(-3px);box-shadow:0 16px 44px rgba(33,219,174,.3)}
+    .hero-orbit{position:relative;display:grid;place-items:center;min-height:380px}.orbit{--progress:0deg;width:290px;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--cyan) 0 var(--progress),var(--blue) var(--progress),rgba(255,255,255,.07) 0);box-shadow:0 0 90px rgba(38,124,255,.2);animation:enter .8s ease-out both}.orbit:before{content:"";position:absolute;width:254px;aspect-ratio:1;border-radius:50%;background:#09182b;border:1px solid rgba(255,255,255,.08)}.orbit div{position:relative;text-align:center;display:grid}.orbit strong{font-size:58px;letter-spacing:-.06em}.orbit span{color:var(--muted);font-size:13px}.orbit-label{position:absolute;padding:9px 13px;border:1px solid rgba(33,219,174,.25);background:rgba(11,34,57,.85);color:#cfe9e3;border-radius:999px;font-size:12px}.orbit-label.top{top:45px;right:40px}.orbit-label.bottom{bottom:46px;left:15px}
+    .stats{display:grid;grid-template-columns:repeat(3,1fr) 1.7fr;border:1px solid rgba(145,168,192,.15);background:rgba(10,31,52,.7);border-radius:22px;overflow:hidden}.stats article{min-height:130px;padding:25px 28px;display:grid;grid-template-columns:auto 1fr;align-content:center;border-right:1px solid rgba(145,168,192,.13)}.stats article>span{grid-column:1/-1;color:var(--muted);font-size:13px}.stats strong{font-size:38px}.stats small{align-self:end;margin:0 0 7px 10px;color:#839bb2}.stats .next{grid-template-columns:auto 1fr;gap:17px;align-items:center;background:linear-gradient(120deg,rgba(38,124,255,.12),rgba(33,219,174,.08))}.next div{display:grid;gap:7px}.next div span{color:var(--cyan);font-size:12px;letter-spacing:.16em}.next b{font-size:17px}.pulse{width:12px;height:12px;border-radius:50%;background:var(--cyan);box-shadow:0 0 0 8px rgba(33,219,174,.1);animation:pulse 2s infinite}
+    .workspace{display:grid;grid-template-columns:1fr 1.08fr;gap:24px;padding:90px 0;align-items:start}.panel{border:1px solid rgba(145,168,192,.16);background:linear-gradient(155deg,rgba(15,39,65,.94),rgba(8,27,47,.97));border-radius:24px;padding:32px;box-shadow:0 28px 90px rgba(0,0,0,.2)}.heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:25px}.heading p{margin:0 0 8px}.heading h2{margin:0;font-size:28px}.badge{padding:8px 11px;color:#a8c2da;background:rgba(38,124,255,.1);border:1px solid rgba(38,124,255,.2);border-radius:9px;font-size:12px}
+    form{display:grid;gap:17px}form>label{display:grid;gap:8px;color:#bed0e1;font-size:13px;font-weight:700}input,textarea{width:100%;border:1px solid rgba(145,168,192,.19);color:var(--ice);background:#091c31;border-radius:11px;padding:13px 14px;outline:none;resize:vertical}input:focus,textarea:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(33,219,174,.09)}fieldset{display:flex;align-items:center;gap:20px;border:0;padding:0;color:#b8cbdc}legend{float:left;margin-right:20px;font-size:13px;font-weight:700}.radio{display:flex;gap:7px;align-items:center;font-size:13px}.radio input{width:auto;accent-color:var(--cyan)}.submit{width:100%;margin-top:4px}.note{margin:0;text-align:center;color:#6f8aa2;font-size:11px}
+    .empty{padding:42px 20px;text-align:center;color:#718aa2;border:1px dashed rgba(145,168,192,.18);border-radius:14px}.record{display:grid;grid-template-columns:30px 1fr;position:relative;padding-bottom:18px}.record:before{content:"";position:absolute;left:7px;top:20px;bottom:-2px;width:1px;background:linear-gradient(var(--blue),rgba(38,124,255,.08))}.record:last-child:before{display:none}.node{width:15px;height:15px;margin-top:5px;border-radius:50%;position:relative;z-index:1}.node.done{background:var(--cyan);box-shadow:0 0 0 6px rgba(33,219,174,.09),0 0 20px rgba(33,219,174,.35)}.node.active{background:var(--blue);box-shadow:0 0 0 6px rgba(38,124,255,.11)}
+    .record-content{padding:0 0 20px 8px;border-bottom:1px solid rgba(145,168,192,.11)}.record-top{display:flex;justify-content:space-between;align-items:center}.record-top small{color:#7793ab}.status{border:0;padding:6px 9px;border-radius:7px;cursor:pointer;font-size:11px}.status.done{color:#5ef3c8;background:rgba(33,219,174,.1)}.status.active{color:#7fb1ff;background:rgba(38,124,255,.12)}.record h3{margin:9px 0 8px;font-size:17px}.record p{margin:0;color:#91a8bd;line-height:1.7;font-size:13px;white-space:pre-wrap}.record details{margin-top:10px}.record summary{color:#81a5c3;font-size:12px;cursor:pointer}.record details p{margin-top:8px;padding:10px;background:rgba(255,255,255,.025);border-radius:8px}.actions{display:flex;justify-content:space-between;margin-top:12px}.actions a{color:var(--cyan);font-size:12px}.actions button{margin-left:auto;border:0;background:transparent;color:#647f96;font-size:11px;cursor:pointer}.actions button:hover{color:#ff8794}
+    footer{min-height:130px;border-top:1px solid rgba(145,168,192,.14);display:flex;align-items:center;justify-content:space-between;color:#718aa2;font-size:13px}footer span{color:#d6e5f2;font-weight:800}footer a{color:var(--cyan)}.toast{position:fixed;z-index:10;right:28px;bottom:28px;padding:15px 20px;border-radius:12px;color:#061725;background:var(--cyan);font-weight:800;box-shadow:0 18px 50px rgba(33,219,174,.25);animation:toast .35s ease-out}
+    @keyframes pulse{50%{box-shadow:0 0 0 13px rgba(33,219,174,0)}}@keyframes enter{from{transform:scale(.84) rotate(-20deg);opacity:0}}@keyframes toast{from{transform:translateY(20px);opacity:0}}
+    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;animation:none!important;transition:none!important}}@media(max-width:900px){.nav-links{display:none}.hero{grid-template-columns:1fr;padding-top:55px;gap:20px}.hero-orbit{min-height:330px}.stats{grid-template-columns:1fr 1fr}.workspace{grid-template-columns:1fr}.stats article:nth-child(2){border-right:0}.next{grid-column:1/-1}}@media(max-width:600px){.nav,.hero,.stats,.workspace,footer{width:min(100% - 28px,1380px)}.ghost{padding:9px 11px;font-size:12px}h1{font-size:46px}.hero-copy{font-size:15px}.hero-orbit{transform:scale(.84);margin:-25px 0}.stats{grid-template-columns:1fr}.stats .next{grid-column:auto}.stats article{border-right:0;border-bottom:1px solid rgba(145,168,192,.13)}.workspace{padding:55px 0}.panel{padding:22px 18px;border-radius:18px}fieldset{flex-wrap:wrap}.heading h2{font-size:23px}footer{flex-direction:column;justify-content:center;gap:12px;text-align:center;padding:24px 0}}
+  </style>
+</head>
+<body>
+<main>
+  <div class="energy one"></div><div class="energy two"></div>
+  <nav class="nav" aria-label="主导航">
+    <a class="brand" href="#top"><span>Q</span> QQ淇成长站</a>
+    <div class="nav-links"><a href="#dashboard">成长总览</a><a href="#submit">提交成果</a><a href="#records">双周记录</a></div>
+    <button class="ghost" id="export">导出记录</button>
+  </nav>
+  <section class="hero" id="top">
+    <div><p class="eyebrow"><i></i>LONG-TERM INTERNSHIP SPRINT</p><h1>QQ淇的大二<br><em>实习逆袭之路</em></h1><p class="hero-copy">从大一暑假到大二寒假，每两周认真交付一次。把工作变成成果，把经历变成能力。</p><a class="primary" href="#submit">提交本期总结 <b>→</b></a></div>
+    <div class="hero-orbit"><div class="orbit" id="orbit"><div><strong id="progress">0%</strong><span>当前完成率</span></div></div><span class="orbit-label top">两周一交付</span><span class="orbit-label bottom">持续复盘中</span></div>
+  </section>
+  <section class="stats" id="dashboard">
+    <article><span>累计提交</span><strong id="total">0</strong><small>份双周总结</small></article>
+    <article><span>已完成</span><strong id="completed">0</strong><small>个阶段成果</small></article>
+    <article><span>当前节奏</span><strong>14</strong><small>天 / 次交付</small></article>
+    <article class="next"><span class="pulse"></span><div><span>下一步</span><b>记录真实进展，不等待完美</b></div></article>
+  </section>
+  <section class="workspace">
+    <article class="panel" id="submit">
+      <div class="heading"><div><p>BIWEEKLY DELIVERY</p><h2>提交本期成果</h2></div><span class="badge">每 14 天</span></div>
+      <form id="form">
+        <label>本期标题<input name="period" required placeholder="例：第 03 期 · 完成项目首版"></label>
+        <label>工作记录<textarea name="work" required rows="4" placeholder="这两周做了什么？遇到了哪些具体问题？"></textarea></label>
+        <label>成果链接<input name="link" type="url" placeholder="https://…（可选）"></label>
+        <label>复盘总结<textarea name="review" required rows="4" placeholder="哪些做得好？下两周要改变什么？"></textarea></label>
+        <fieldset><legend>完成状态</legend><label class="radio"><input type="radio" name="status" value="进行中" checked>进行中</label><label class="radio"><input type="radio" name="status" value="已完成">已完成</label></fieldset>
+        <button class="submit" type="submit">保存本期成果 <span>↗</span></button><p class="note">记录仅保存在当前浏览器，请定期导出备份。</p>
+      </form>
+    </article>
+    <article class="panel" id="records">
+      <div class="heading"><div><p>GROWTH TIMELINE</p><h2>双周成长足迹</h2></div><span class="badge" id="count">0 条</span></div><div id="timeline"></div>
+    </article>
+  </section>
+  <footer><span>QQ淇成长站</span><p>每两周，向更好的自己交付一次成果。</p><a href="#top">回到顶部 ↑</a></footer>
+  <div class="toast" id="toast" role="status" hidden></div>
+</main>
+<script>
+  const KEY='qqqi-growth-records-v1';
+  const starter=[{id:'welcome',period:'起点 · 暑假准备期',work:'确定实习方向，整理目标岗位需要的能力清单',link:'',review:'先行动，再在每一次双周复盘里修正方向。',status:'已完成',createdAt:'成长起点'}];
+  let records=starter;
+  try{const saved=localStorage.getItem(KEY);if(saved)records=JSON.parse(saved)}catch(e){records=starter}
+  const $=id=>document.getElementById(id);
+  const save=()=>localStorage.setItem(KEY,JSON.stringify(records));
+  function showToast(text){const toast=$('toast');toast.textContent='✓ '+text;toast.hidden=false;clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>toast.hidden=true,3000)}
+  function make(tag,className,text){const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el}
+  function render(){
+    const done=records.filter(r=>r.status==='已完成').length;const pct=records.length?Math.round(done/records.length*100):0;
+    $('total').textContent=records.length;$('completed').textContent=done;$('progress').textContent=pct+'%';$('orbit').style.setProperty('--progress',pct*3.6+'deg');$('count').textContent=records.length+' 条';
+    const timeline=$('timeline');timeline.replaceChildren();
+    if(!records.length){timeline.append(make('div','empty','还没有记录，提交第一份双周总结吧。'));return}
+    [...records].reverse().forEach(item=>{
+      const row=make('div','record');const node=make('span','node '+(item.status==='已完成'?'done':'active'));const content=make('div','record-content');const top=make('div','record-top');top.append(make('small','',item.createdAt));
+      const status=make('button','status '+(item.status==='已完成'?'done':'active'),item.status);status.type='button';status.dataset.action='toggle';status.dataset.id=item.id;top.append(status);content.append(top,make('h3','',item.period),make('p','',item.work));
+      const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='查看复盘';details.append(summary,make('p','',item.review));content.append(details);
+      const actions=make('div','actions');if(item.link){const link=make('a','','查看成果 ↗');link.href=item.link;link.target='_blank';link.rel='noreferrer';actions.append(link)}const del=make('button','','删除');del.type='button';del.dataset.action='delete';del.dataset.id=item.id;actions.append(del);content.append(actions);row.append(node,content);timeline.append(row)
+    })
+  }
+  $('form').addEventListener('submit',event=>{event.preventDefault();const data=new FormData(event.currentTarget);records.push({id:crypto.randomUUID?crypto.randomUUID():Date.now().toString(36),period:String(data.get('period')),work:String(data.get('work')),link:String(data.get('link')||''),review:String(data.get('review')),status:String(data.get('status')),createdAt:new Intl.DateTimeFormat('zh-CN',{month:'short',day:'numeric'}).format(new Date())});save();render();event.currentTarget.reset();event.currentTarget.querySelector('[value="进行中"]').checked=true;showToast('本期成果已归档，继续冲刺！')});
+  $('timeline').addEventListener('click',event=>{const button=event.target.closest('button[data-action]');if(!button)return;const index=records.findIndex(r=>r.id===button.dataset.id);if(index<0)return;if(button.dataset.action==='toggle')records[index].status=records[index].status==='已完成'?'进行中':'已完成';else records.splice(index,1);save();render()});
+  $('export').addEventListener('click',()=>{const blob=new Blob([JSON.stringify(records,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='小淇的双周成长记录.json';a.click();URL.revokeObjectURL(url)});
+  render();
+</script>
+</body>
+</html>
