@@ -3,6 +3,50 @@
 
 create extension if not exists pgcrypto with schema extensions;
 
+-- Keep the single-user allowlist outside the API-exposed public schema. The
+-- actual email address is inserted privately in the Supabase SQL editor and is
+-- intentionally never committed to this repository.
+create schema if not exists private;
+
+create table if not exists private.allowed_users (
+  email text primary key,
+  created_at timestamptz not null default now(),
+  constraint allowed_users_email_not_blank
+    check (length(btrim(email)) > 0)
+);
+
+create or replace function private.current_user_is_allowed()
+returns boolean
+language sql
+stable
+security definer
+set search_path = pg_catalog, private
+as $$
+  select exists (
+    select 1
+    from private.allowed_users
+    where lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+  );
+$$;
+
+revoke all privileges on schema private from public;
+revoke all privileges on schema private from anon;
+revoke all privileges on schema private from authenticated;
+grant usage on schema private to authenticated;
+
+revoke all privileges on table private.allowed_users from public;
+revoke all privileges on table private.allowed_users from anon;
+revoke all privileges on table private.allowed_users from authenticated;
+
+revoke all privileges on function private.current_user_is_allowed()
+  from public;
+revoke all privileges on function private.current_user_is_allowed()
+  from anon;
+revoke all privileges on function private.current_user_is_allowed()
+  from authenticated;
+grant execute on function private.current_user_is_allowed()
+  to authenticated;
+
 create table if not exists public.progress_entries (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid()
@@ -55,7 +99,10 @@ create policy "Users can read their own progress entries"
   on public.progress_entries
   for select
   to authenticated
-  using ((select auth.uid()) = user_id);
+  using (
+    (select auth.uid()) = user_id
+    and (select private.current_user_is_allowed())
+  );
 
 drop policy if exists "Users can create their own progress entries"
   on public.progress_entries;
@@ -63,7 +110,10 @@ create policy "Users can create their own progress entries"
   on public.progress_entries
   for insert
   to authenticated
-  with check ((select auth.uid()) = user_id);
+  with check (
+    (select auth.uid()) = user_id
+    and (select private.current_user_is_allowed())
+  );
 
 drop policy if exists "Users can update their own progress entries"
   on public.progress_entries;
@@ -71,8 +121,14 @@ create policy "Users can update their own progress entries"
   on public.progress_entries
   for update
   to authenticated
-  using ((select auth.uid()) = user_id)
-  with check ((select auth.uid()) = user_id);
+  using (
+    (select auth.uid()) = user_id
+    and (select private.current_user_is_allowed())
+  )
+  with check (
+    (select auth.uid()) = user_id
+    and (select private.current_user_is_allowed())
+  );
 
 drop policy if exists "Users can delete their own progress entries"
   on public.progress_entries;
@@ -80,7 +136,10 @@ create policy "Users can delete their own progress entries"
   on public.progress_entries
   for delete
   to authenticated
-  using ((select auth.uid()) = user_id);
+  using (
+    (select auth.uid()) = user_id
+    and (select private.current_user_is_allowed())
+  );
 
 -- Supabase grants table privileges separately from RLS. Anonymous clients receive
 -- no table privilege; authenticated clients still have to pass the policies above.

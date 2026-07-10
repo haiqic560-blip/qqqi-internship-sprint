@@ -5,7 +5,32 @@
   const MIGRATION_KEY = "qqqi-cloud-migration-v1";
   const config = window.QQQI_SUPABASE_CONFIG || {};
   const $ = (id) => document.getElementById(id);
-  const state = { client: null, session: null, records: [], loading: false };
+  const state = {
+    client: null,
+    session: null,
+    records: [],
+    loading: false,
+    authLoading: false,
+    authMode: "signin",
+    activeUserId: null,
+  };
+
+  const AUTH_CONTENT = {
+    signin: {
+      title: "继续你的实习逆袭之路",
+      copy: "使用邮箱和密码登录，双周记录会安全同步到手机和电脑。",
+      hint: "输入创建账号时设置的密码。",
+      submit: "登录成长站",
+      pending: "正在登录…",
+    },
+    signup: {
+      title: "创建你的专属成长账号",
+      copy: "首次使用时，用邮箱和至少 8 位密码创建账号；之后即可直接登录。",
+      hint: "设置至少 8 位密码，并妥善保存。",
+      submit: "创建账号并进入",
+      pending: "正在创建账号…",
+    },
+  };
 
   function make(tag, className, text) {
     const element = document.createElement(tag);
@@ -19,6 +44,70 @@
     target.textContent = message;
     target.dataset.tone = tone;
     target.hidden = !message;
+  }
+
+  function setAuthLoading(loading) {
+    state.authLoading = loading;
+    const content = AUTH_CONTENT[state.authMode];
+    const form = $("authForm");
+    form.setAttribute("aria-busy", String(loading));
+    $("authSubmit").disabled = loading;
+    $("authSubmitLabel").textContent = loading ? content.pending : content.submit;
+    form.querySelectorAll("input, [data-auth-mode]").forEach((element) => {
+      element.disabled = loading;
+    });
+  }
+
+  function setAuthMode(mode, clearMessage = true) {
+    if (!AUTH_CONTENT[mode]) return;
+    state.authMode = mode;
+    const content = AUTH_CONTENT[mode];
+    $("authTitle").textContent = content.title;
+    $("authCopy").textContent = content.copy;
+    $("authPasswordHint").textContent = content.hint;
+    $("authSubmitLabel").textContent = content.submit;
+    $("authPassword").autocomplete = mode === "signup" ? "new-password" : "current-password";
+    document.querySelectorAll("[data-auth-mode]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(button.dataset.authMode === mode));
+    });
+    if (clearMessage) setAuthMessage("");
+  }
+
+  function getAuthErrorMessage(error, mode = state.authMode) {
+    const code = String(error?.code || "").toLowerCase();
+    const message = String(error?.message || "").toLowerCase();
+    const matches = (...terms) => terms.some((term) => code.includes(term) || message.includes(term));
+
+    if (matches("invalid_credentials", "invalid login credentials")) {
+      return "邮箱或密码不正确。请检查后重试；首次使用请先创建账号。";
+    }
+    if (matches("email_not_confirmed", "email not confirmed")) {
+      return "该账号尚未完成认证，请联系管理员检查邮箱确认设置。";
+    }
+    if (matches("user_already_exists", "user already registered", "already been registered")) {
+      return "这个邮箱已经创建过账号，请切换到“已有账号”登录。";
+    }
+    if (matches("weak_password", "password should be", "password must be", "password is too short")) {
+      return "密码强度不足。请至少设置 8 位，并避免使用过于简单的密码。";
+    }
+    if (matches("signup_disabled", "signups not allowed", "signup is disabled")) {
+      return "当前暂不开放创建账号，请使用已有账号登录。";
+    }
+    if (matches("over_request_rate_limit", "rate limit", "too many requests")) {
+      return "操作太频繁，请稍等几分钟后再试。";
+    }
+    if (matches("invalid email", "email address is invalid", "unable to validate email")) {
+      return "邮箱格式不正确，请检查后重新输入。";
+    }
+    if (matches("failed to fetch", "networkerror", "network request failed", "load failed")) {
+      return "网络连接失败，请检查网络后重试。";
+    }
+    if (matches("database error", "unexpected_failure")) {
+      return "账号服务暂时不可用，请稍后重试。";
+    }
+    return mode === "signup"
+      ? "账号创建失败，请检查信息后稍后重试。"
+      : "登录失败，请检查邮箱和密码后重试。";
   }
 
   function showToast(message, tone = "success") {
@@ -187,32 +276,75 @@
     $("appShell").hidden = !signedIn;
     if (!signedIn) {
       state.records = [];
+      state.activeUserId = null;
       return;
     }
     $("userEmail").textContent = session.user.email || "已登录";
-    await loadRecords();
-    await migrateLocalRecords();
-  }
-
-  async function signIn(email) {
-    setAuthMessage("正在发送登录链接…");
-    const redirectTo = `${window.location.origin}${window.location.pathname}`;
-    const { error } = await state.client.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: redirectTo, shouldCreateUser: config.allowSignup === true },
-    });
-    if (error) {
-      setAuthMessage(error.message || "登录链接发送失败", "error");
+    if (state.activeUserId === session.user.id) return;
+    state.activeUserId = session.user.id;
+    try {
+      await loadRecords();
+      await migrateLocalRecords();
+    } catch (error) {
+      state.activeUserId = null;
       throw error;
     }
-    setAuthMessage("登录链接已发送，请到邮箱中点击确认。", "success");
+  }
+
+  async function signIn(email, password) {
+    return state.client.auth.signInWithPassword({ email, password });
+  }
+
+  async function signUp(email, password) {
+    return state.client.auth.signUp({ email, password });
+  }
+
+  async function authenticate(email, password) {
+    if (state.authLoading) return;
+    const mode = state.authMode;
+    setAuthMessage(mode === "signup" ? "正在创建账号…" : "正在验证账号…");
+    setAuthLoading(true);
+    try {
+      const { data, error } = mode === "signup"
+        ? await signUp(email, password)
+        : await signIn(email, password);
+      if (error) throw error;
+
+      if (mode === "signup" && !data.session && data.user?.identities?.length === 0) {
+        setAuthMode("signin", false);
+        setAuthMessage("这个邮箱已经创建过账号，请使用刚才输入的密码登录。", "error");
+        return;
+      }
+      if (!data.session) {
+        setAuthMessage("账号已创建，但认证服务仍要求邮箱确认。请联系管理员关闭邮箱确认后再登录。", "error");
+        return;
+      }
+
+      setAuthMessage(mode === "signup" ? "账号创建成功，正在进入…" : "登录成功，正在读取记录…", "success");
+      try {
+        await applySession(data.session);
+      } catch (syncError) {
+        console.error(syncError);
+        setAuthMessage("账号已登录，但云端记录暂时无法读取。请稍后刷新页面重试。", "error");
+      }
+    } catch (error) {
+      setAuthMessage(getAuthErrorMessage(error, mode), "error");
+      throw error;
+    } finally {
+      setAuthLoading(false);
+    }
   }
 
   async function signOut() {
     setLoading(true, "正在退出");
     const { error } = await state.client.auth.signOut({ scope: "local" });
     setLoading(false);
-    if (error) showToast("退出失败，请重试", "error");
+    if (error) {
+      showToast("退出失败，请重试", "error");
+      return;
+    }
+    await applySession(null);
+    setAuthMode("signin");
   }
 
   async function createRecord(form) {
@@ -311,10 +443,20 @@
   }
 
   function bindEvents() {
+    document.querySelectorAll("[data-auth-mode]").forEach((button) => {
+      button.addEventListener("click", () => setAuthMode(button.dataset.authMode));
+    });
     $("authForm").addEventListener("submit", async (event) => {
       event.preventDefault();
-      const email = String(new FormData(event.currentTarget).get("email") || "").trim();
-      try { await signIn(email); } catch { /* surfaced in the form */ }
+      const data = new FormData(event.currentTarget);
+      const email = String(data.get("email") || "").trim();
+      const password = String(data.get("password") || "");
+      if (password.length < 8) {
+        setAuthMessage("密码至少需要 8 位。", "error");
+        $("authPassword").focus();
+        return;
+      }
+      try { await authenticate(email, password); } catch { /* surfaced in the form */ }
     });
     $("signOut").addEventListener("click", signOut);
     $("export").addEventListener("click", exportRecords);
@@ -348,7 +490,7 @@
     });
   }
 
-  window.QQQIBackend = { init, signIn, signOut, loadRecords, migrateLocalRecords };
+  window.QQQIBackend = { init, signIn, signUp, signOut, loadRecords, migrateLocalRecords };
   init().catch((error) => {
     console.error(error);
     setAuthMessage("云端服务初始化失败，请稍后重试。", "error");
