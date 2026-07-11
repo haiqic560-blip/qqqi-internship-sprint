@@ -67,6 +67,24 @@ create table if not exists public.progress_entries (
     check (status in ('进行中', '已完成'))
 );
 
+-- These columns were introduced after the first deployment. Keeping them in
+-- ALTER statements makes this file safe to apply to both fresh and existing
+-- projects.
+alter table if exists public.progress_entries
+  add column if not exists stage_key text;
+
+alter table if exists public.progress_entries
+  add column if not exists roadmap_task_keys text[]
+    not null default '{}'::text[];
+
+update public.progress_entries
+set roadmap_task_keys = '{}'::text[]
+where roadmap_task_keys is null;
+
+alter table if exists public.progress_entries
+  alter column roadmap_task_keys set default '{}'::text[],
+  alter column roadmap_task_keys set not null;
+
 create index if not exists progress_entries_user_period_idx
   on public.progress_entries (user_id, period_start desc, created_at desc);
 
@@ -155,4 +173,125 @@ revoke all privileges on function public.set_progress_entries_updated_at()
 revoke all privileges on function public.set_progress_entries_updated_at()
   from anon;
 revoke all privileges on function public.set_progress_entries_updated_at()
+  from authenticated;
+
+-- Roadmap tasks turn the long-term learning plan into user-owned, trackable
+-- work items. Stable task keys let the frontend seed tasks idempotently.
+create table if not exists public.learning_tasks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid()
+    references auth.users (id) on delete cascade,
+  task_key text not null,
+  stage_key text not null,
+  category text not null,
+  title text not null,
+  detail text not null,
+  target_start date,
+  target_end date,
+  cadence text not null,
+  priority smallint not null default 3,
+  status text not null default '未开始',
+  evidence_link text,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint learning_tasks_user_task_key_unique
+    unique (user_id, task_key),
+  constraint learning_tasks_valid_target_range
+    check (
+      target_start is null
+      or target_end is null
+      or target_end >= target_start
+    ),
+  constraint learning_tasks_valid_priority
+    check (priority between 1 and 5),
+  constraint learning_tasks_valid_status
+    check (status in ('未开始', '进行中', '已完成'))
+);
+
+create index if not exists learning_tasks_user_stage_schedule_idx
+  on public.learning_tasks (user_id, stage_key, target_start, priority);
+
+create or replace function public.set_learning_tasks_updated_at()
+returns trigger
+language plpgsql
+security invoker
+set search_path = pg_catalog
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists set_learning_tasks_updated_at
+  on public.learning_tasks;
+
+create trigger set_learning_tasks_updated_at
+before update on public.learning_tasks
+for each row
+execute function public.set_learning_tasks_updated_at();
+
+alter table public.learning_tasks enable row level security;
+alter table public.learning_tasks force row level security;
+
+drop policy if exists "Users can read their own learning tasks"
+  on public.learning_tasks;
+create policy "Users can read their own learning tasks"
+  on public.learning_tasks
+  for select
+  to authenticated
+  using (
+    (select auth.uid()) = user_id
+    and (select private.current_user_is_allowed())
+  );
+
+drop policy if exists "Users can create their own learning tasks"
+  on public.learning_tasks;
+create policy "Users can create their own learning tasks"
+  on public.learning_tasks
+  for insert
+  to authenticated
+  with check (
+    (select auth.uid()) = user_id
+    and (select private.current_user_is_allowed())
+  );
+
+drop policy if exists "Users can update their own learning tasks"
+  on public.learning_tasks;
+create policy "Users can update their own learning tasks"
+  on public.learning_tasks
+  for update
+  to authenticated
+  using (
+    (select auth.uid()) = user_id
+    and (select private.current_user_is_allowed())
+  )
+  with check (
+    (select auth.uid()) = user_id
+    and (select private.current_user_is_allowed())
+  );
+
+drop policy if exists "Users can delete their own learning tasks"
+  on public.learning_tasks;
+create policy "Users can delete their own learning tasks"
+  on public.learning_tasks
+  for delete
+  to authenticated
+  using (
+    (select auth.uid()) = user_id
+    and (select private.current_user_is_allowed())
+  );
+
+revoke all privileges on table public.learning_tasks from public;
+revoke all privileges on table public.learning_tasks from anon;
+revoke all privileges on table public.learning_tasks from authenticated;
+grant select, insert, update, delete
+  on table public.learning_tasks to authenticated;
+
+revoke all privileges on function public.set_learning_tasks_updated_at()
+  from public;
+revoke all privileges on function public.set_learning_tasks_updated_at()
+  from anon;
+revoke all privileges on function public.set_learning_tasks_updated_at()
   from authenticated;
