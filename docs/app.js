@@ -3,6 +3,8 @@
 
   const LOCAL_KEY = "qqqi-growth-records-v1";
   const MIGRATION_KEY = "qqqi-cloud-migration-v1";
+  const GITHUB_CACHE_KEY = "qqqi-github-activity-v1";
+  const GITHUB_CACHE_TTL = 15 * 60 * 1000;
   const config = window.QQQI_SUPABASE_CONFIG || {};
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -15,6 +17,9 @@
     authMode: "signin",
     activeUserId: null,
     taskLoadingKey: null,
+    evidenceTaskKey: null,
+    githubLoading: false,
+    githubActivity: null,
   };
 
   const AUTH_CONTENT = {
@@ -107,10 +112,13 @@
     defineTask("s1-ds-linear", "stage-1", "数据结构", "手写线性结构", "自己实现顺序表、单链表、栈和队列，并能解释核心操作。", "2026-08-01", "2026-08-10", "一次", 5),
     defineTask("s1-ds-tree-sort", "stage-1", "数据结构", "二叉树、查找、排序与递归", "实现二叉树，理解二分查找、冒泡、快速排序和递归思想。", "2026-08-08", "2026-08-14", "一次", 4),
     defineTask("s1-jdbc-mysql", "stage-1", "项目准备", "掌握 JDBC 与 MySQL 基础", "完成数据库连接、基础 SQL 和 Java 数据访问练习。", "2026-08-01", "2026-08-14", "一次", 5),
-    defineTask("s1-project-scope", "stage-1", "暑期项目", "确定项目选题与数据模型", "从失物招领、预约、停车或成绩分析中选题，先写 README 与表结构。", "2026-08-01", "2026-08-07", "一次", 4),
-    defineTask("s1-project-login-crud", "stage-1", "暑期项目", "完成登录与 CRUD", "用 JavaSE + JDBC + MySQL 完成登录和核心增删改查。", "2026-08-15", "2026-08-22", "一次", 5),
+    defineTask("s1-project-scope", "stage-1", "项目准备", "确定选题与需求范围", "从失物招领、预约、停车或成绩分析中选题，明确用户、核心流程与不做事项。", "2026-08-01", "2026-08-04", "一次", 5),
+    defineTask("s1-project-schema", "stage-1", "项目准备", "完成数据库设计", "画出核心数据关系，建立 MySQL 表结构并准备可重复执行的初始化 SQL。", "2026-08-05", "2026-08-08", "一次", 5),
+    defineTask("s1-project-login-crud", "stage-1", "暑期项目", "完成登录流程", "用 JavaSE + JDBC + MySQL 完成账号登录、输入校验与基础异常提示。", "2026-08-15", "2026-08-18", "一次", 5),
+    defineTask("s1-project-crud", "stage-1", "暑期项目", "完成核心 CRUD", "围绕项目主实体打通新增、查询、修改和删除，确保主流程可演示。", "2026-08-18", "2026-08-23", "一次", 5),
     defineTask("s1-project-page-error", "stage-1", "暑期项目", "完成分页与异常处理", "增加分页、输入校验和简单异常处理，让项目能够稳定演示。", "2026-08-23", "2026-08-28", "一次", 5),
-    defineTask("s1-project-release", "stage-1", "验收复盘", "测试、README 与 GitHub 发布", "完成测试、演示说明、代码整理和阶段复盘，在 8 月 31 日前验收。", "2026-08-29", "2026-08-31", "一次", 5),
+    defineTask("s1-project-test", "stage-1", "验收复盘", "测试和演示检查", "覆盖登录、CRUD、分页和异常场景，修复阻塞演示的问题并准备演示数据。", "2026-08-27", "2026-08-29", "一次", 5),
+    defineTask("s1-project-release", "stage-1", "验收复盘", "README、复盘与 GitHub 发布", "整理启动说明、功能截图、技术收获与下一步计划，在 8 月 31 日前发布验收。", "2026-08-29", "2026-08-31", "一次", 5),
 
     defineTask("s2-es", "stage-2", "学校主线", "ECMAScript 与前后端联调基础", "掌握 ES6、DOM、Ajax、Promise，为 Spring Boot 联调做准备。", "2026-09-01", "2026-09-30", "一次", 4),
     defineTask("s2-mysql", "stage-2", "数据库", "MySQL 企业基础", "掌握 SQL、多表查询、索引、Explain、事务和数据库设计。", "2026-10-01", "2026-10-21", "一次", 5),
@@ -399,6 +407,29 @@
     });
   }
 
+  function createTaskActions(task, compact = false) {
+    const actions = make("div", compact ? "milestone-controls" : "task-actions");
+    if (task.evidence_link) {
+      const link = make("a", "evidence-link", "查看证据 ↗");
+      link.href = task.evidence_link;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      actions.append(link);
+    }
+    const evidence = make("button", "evidence-action", task.evidence_link || task.evidence_note ? "编辑证据" : "添加证据");
+    evidence.type = "button";
+    evidence.dataset.evidenceTaskKey = task.task_key;
+    evidence.setAttribute("aria-label", `${evidence.textContent}：“${task.title}”`);
+    const status = make("button", "status-cycle", task.status);
+    status.type = "button";
+    status.dataset.taskKey = task.task_key;
+    status.dataset.status = task.status;
+    status.disabled = state.taskLoadingKey === task.task_key;
+    status.setAttribute("aria-label", `更新“${task.title}”状态，当前为${task.status}`);
+    actions.append(evidence, status);
+    return actions;
+  }
+
   function renderTaskBoard(stage) {
     const taskBoard = $("taskBoard");
     taskBoard.replaceChildren();
@@ -424,17 +455,154 @@
         if (task.target_end) meta.append(make("span", "", `目标 ${formatDate(task.target_end)}`));
         meta.append(make("span", "", task.cadence));
         copy.append(meta);
-        const button = make("button", "status-cycle", task.status);
-        button.type = "button";
-        button.dataset.taskKey = task.task_key;
-        button.dataset.status = task.status;
-        button.disabled = state.taskLoadingKey === task.task_key;
-        button.setAttribute("aria-label", `更新“${task.title}”状态，当前为${task.status}`);
-        row.append(copy, button);
+        row.append(copy, createTaskActions(task));
         group.append(row);
       });
       taskBoard.append(group);
     });
+  }
+
+  function getProjectTasks() {
+    const categories = new Set(["项目准备", "暑期项目", "验收复盘"]);
+    return sortTasks(state.tasks.filter((task) => task.stage_key === "stage-1" && categories.has(task.category)));
+  }
+
+  function renderMilestones() {
+    const list = $("milestoneList");
+    const tasks = getProjectTasks();
+    const completed = tasks.filter((task) => task.status === "已完成").length;
+    const percent = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
+    $("milestoneProgressText").textContent = `${completed} / ${tasks.length} 完成`;
+    $("milestoneProgressBar").style.width = `${percent}%`;
+    list.replaceChildren();
+    tasks.forEach((task, index) => {
+      const card = make("article", "milestone-card");
+      card.dataset.status = task.status;
+      const copy = make("div", "milestone-copy");
+      copy.append(make("h3", "", task.title), make("p", "", task.detail));
+      if (task.evidence_note) {
+        const note = make("p", "github-state", `证据：${task.evidence_note}`);
+        copy.append(note);
+      }
+      copy.append(make("time", "milestone-date", task.target_end ? `目标 ${formatDate(task.target_end)}` : "长期任务"));
+      copy.append(createTaskActions(task, true));
+      card.append(make("span", "milestone-number", String(index + 1).padStart(2, "0")), copy);
+      list.append(card);
+    });
+  }
+
+  function openEvidenceDialog(taskKey) {
+    const task = state.tasks.find((candidate) => candidate.task_key === taskKey);
+    if (!task) return;
+    state.evidenceTaskKey = taskKey;
+    $("evidenceTaskName").textContent = task.title;
+    $("evidenceLink").value = task.evidence_link || "";
+    $("evidenceNote").value = task.evidence_note || "";
+    $("evidenceDialog").showModal();
+    window.setTimeout(() => $("evidenceLink").focus(), 0);
+  }
+
+  function closeEvidenceDialog() {
+    state.evidenceTaskKey = null;
+    $("evidenceDialog").close();
+  }
+
+  async function saveTaskEvidence(form) {
+    const task = state.tasks.find((candidate) => candidate.task_key === state.evidenceTaskKey);
+    if (!task) return;
+    const data = new FormData(form);
+    const evidenceLink = String(data.get("evidence_link") || "").trim() || null;
+    const evidenceNote = String(data.get("evidence_note") || "").trim() || null;
+    if (!evidenceLink && !evidenceNote) {
+      showToast("请填写成果链接或证据说明", "error");
+      return;
+    }
+    $("evidenceSave").disabled = true;
+    const { error } = await state.client
+      .from("learning_tasks")
+      .update({ evidence_link: evidenceLink, evidence_note: evidenceNote })
+      .eq("task_key", task.task_key)
+      .eq("user_id", state.session.user.id);
+    $("evidenceSave").disabled = false;
+    if (error) {
+      showToast("证据保存失败，请稍后重试", "error");
+      return;
+    }
+    task.evidence_link = evidenceLink;
+    task.evidence_note = evidenceNote;
+    closeEvidenceDialog();
+    renderLearningPlan();
+    showToast("任务成果证据已保存");
+  }
+
+  function renderGitHubActivity(activity) {
+    $("githubCommits").textContent = String(activity.commits);
+    $("githubRepos").textContent = String(activity.activeRepos);
+    const list = $("githubRepoList");
+    list.replaceChildren();
+    activity.repos.slice(0, 4).forEach((repo) => {
+      const item = make("div", "repo-item");
+      const link = make("a", "", repo.name);
+      link.href = repo.html_url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      const updated = new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" }).format(new Date(repo.pushed_at));
+      item.append(link, make("span", "", `${updated} 更新`));
+      list.append(item);
+    });
+    if (!activity.repos.length) list.append(make("p", "github-state", "还没有可展示的公开仓库。"));
+    const syncedAt = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(activity.fetchedAt));
+    $("githubState").textContent = `公开数据 · ${syncedAt} 同步 · 不需要访问令牌`;
+  }
+
+  async function loadGitHubActivity(force = false) {
+    if (state.githubLoading) return;
+    const username = config.githubUsername;
+    if (!username) {
+      $("githubState").textContent = "尚未配置 GitHub 用户名。";
+      return;
+    }
+    if (!force) {
+      try {
+        const cached = JSON.parse(localStorage.getItem(GITHUB_CACHE_KEY) || "null");
+        if (cached && Date.now() - cached.fetchedAt < GITHUB_CACHE_TTL) {
+          state.githubActivity = cached;
+          renderGitHubActivity(cached);
+          return;
+        }
+      } catch { /* ignore invalid cache */ }
+    }
+    state.githubLoading = true;
+    $("githubRefresh").disabled = true;
+    $("githubState").textContent = "正在同步 GitHub 公开活动…";
+    try {
+      const headers = { Accept: "application/vnd.github+json" };
+      const [eventsResponse, reposResponse] = await Promise.all([
+        fetch(`https://api.github.com/users/${encodeURIComponent(username)}/events/public?per_page=100`, { headers }),
+        fetch(`https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=pushed&per_page=10`, { headers }),
+      ]);
+      if (!eventsResponse.ok || !reposResponse.ok) throw new Error("GitHub API unavailable");
+      const [events, repos] = await Promise.all([eventsResponse.json(), reposResponse.json()]);
+      const since = Date.now() - 14 * 86400000;
+      const recentPushes = events.filter((event) => event.type === "PushEvent" && new Date(event.created_at).getTime() >= since);
+      const commits = recentPushes.reduce((total, event) => total + (event.payload?.commits?.length || 0), 0);
+      const activeRepoNames = new Set(recentPushes.map((event) => event.repo?.name).filter(Boolean));
+      const activity = {
+        commits,
+        activeRepos: activeRepoNames.size,
+        repos: repos.filter((repo) => !repo.fork).slice(0, 6).map(({ name, html_url, pushed_at }) => ({ name, html_url, pushed_at })),
+        fetchedAt: Date.now(),
+      };
+      state.githubActivity = activity;
+      localStorage.setItem(GITHUB_CACHE_KEY, JSON.stringify(activity));
+      renderGitHubActivity(activity);
+    } catch (error) {
+      console.error(error);
+      $("githubState").textContent = "暂时无法连接 GitHub，点击“刷新”可重试；任务数据不受影响。";
+    } finally {
+      state.githubLoading = false;
+      $("githubRefresh").disabled = false;
+    }
   }
 
   function renderTaskChoices(stage, today) {
@@ -492,6 +660,7 @@
     renderRhythm(stage, today);
     renderRoadmap(stage, today);
     renderTaskBoard(stage);
+    renderMilestones();
     renderTaskChoices(stage, today);
   }
 
@@ -583,7 +752,7 @@
   async function loadTasks() {
     const { data, error } = await state.client
       .from("learning_tasks")
-      .select("id,user_id,task_key,stage_key,category,title,detail,target_start,target_end,cadence,priority,status,evidence_link,completed_at,created_at,updated_at")
+      .select("id,user_id,task_key,stage_key,category,title,detail,target_start,target_end,cadence,priority,status,evidence_link,evidence_note,completed_at,created_at,updated_at")
       .order("target_start", { ascending: true, nullsFirst: false })
       .order("priority", { ascending: false });
     if (error) throw error;
@@ -595,20 +764,30 @@
     setLoading(true, "正在初始化学习路线");
     const { data: existing, error: readError } = await state.client
       .from("learning_tasks")
-      .select("task_key");
+      .select("task_key,status,evidence_link,evidence_note,completed_at");
     if (readError) {
       setLoading(false);
       throw readError;
     }
-    const existingKeys = new Set((existing || []).map((task) => task.task_key));
-    const missing = ROADMAP_TASKS
-      .filter((task) => !existingKeys.has(task.task_key))
-      .map((task) => ({ ...task, user_id: state.session.user.id, status: "未开始" }));
-    if (missing.length) {
-      const { error: insertError } = await state.client.from("learning_tasks").insert(missing);
-      if (insertError) {
+    const existingByKey = new Map((existing || []).map((task) => [task.task_key, task]));
+    const roadmap = ROADMAP_TASKS.map((task) => {
+      const saved = existingByKey.get(task.task_key);
+      return {
+        ...task,
+        user_id: state.session.user.id,
+        status: saved?.status || "未开始",
+        evidence_link: saved?.evidence_link || null,
+        evidence_note: saved?.evidence_note || null,
+        completed_at: saved?.completed_at || null,
+      };
+    });
+    if (roadmap.length) {
+      const { error: upsertError } = await state.client
+        .from("learning_tasks")
+        .upsert(roadmap, { onConflict: "user_id,task_key" });
+      if (upsertError) {
         setLoading(false);
-        throw insertError;
+        throw upsertError;
       }
     }
     await loadTasks();
@@ -716,6 +895,7 @@
       await ensureRoadmapTasks();
       await loadRecords();
       await migrateLocalRecords();
+      loadGitHubActivity().catch(console.error);
     } catch (error) {
       state.activeUserId = null;
       throw error;
@@ -910,11 +1090,28 @@
       if (button.dataset.cloudAction === "toggle") await toggleRecord(button.dataset.id);
       if (button.dataset.cloudAction === "delete") await deleteRecord(button);
     });
-    $("taskBoard").addEventListener("click", async (event) => {
-      const button = event.target.closest("button[data-task-key]");
-      if (!button || state.loading || state.taskLoadingKey) return;
-      await updateTaskStatus(button.dataset.taskKey);
+    const handleTaskAction = async (event) => {
+      const evidence = event.target.closest("button[data-evidence-task-key]");
+      if (evidence) {
+        openEvidenceDialog(evidence.dataset.evidenceTaskKey);
+        return;
+      }
+      const status = event.target.closest("button[data-task-key]");
+      if (!status || state.loading || state.taskLoadingKey) return;
+      await updateTaskStatus(status.dataset.taskKey);
+    };
+    $("taskBoard").addEventListener("click", handleTaskAction);
+    $("milestoneList").addEventListener("click", handleTaskAction);
+    $("evidenceForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await saveTaskEvidence(event.currentTarget);
     });
+    $("evidenceClose").addEventListener("click", closeEvidenceDialog);
+    $("evidenceCancel").addEventListener("click", closeEvidenceDialog);
+    $("evidenceDialog").addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) closeEvidenceDialog();
+    });
+    $("githubRefresh").addEventListener("click", () => loadGitHubActivity(true));
   }
 
   async function init() {
@@ -943,6 +1140,7 @@
     loadRecords,
     loadTasks,
     updateTaskStatus,
+    loadGitHubActivity,
     migrateLocalRecords,
   };
   init().catch((error) => {

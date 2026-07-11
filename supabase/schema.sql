@@ -192,6 +192,7 @@ create table if not exists public.learning_tasks (
   priority smallint not null default 3,
   status text not null default '未开始',
   evidence_link text,
+  evidence_note text,
   completed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -208,6 +209,9 @@ create table if not exists public.learning_tasks (
   constraint learning_tasks_valid_status
     check (status in ('未开始', '进行中', '已完成'))
 );
+
+alter table if exists public.learning_tasks
+  add column if not exists evidence_note text;
 
 create index if not exists learning_tasks_user_stage_schedule_idx
   on public.learning_tasks (user_id, stage_key, target_start, priority);
