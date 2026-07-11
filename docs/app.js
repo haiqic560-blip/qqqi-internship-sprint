@@ -498,6 +498,7 @@
     $("evidenceTaskName").textContent = task.title;
     $("evidenceLink").value = task.evidence_link || "";
     $("evidenceNote").value = task.evidence_note || "";
+    $("evidenceClear").hidden = !(task.evidence_link || task.evidence_note);
     $("evidenceDialog").showModal();
     window.setTimeout(() => $("evidenceLink").focus(), 0);
   }
@@ -533,6 +534,27 @@
     closeEvidenceDialog();
     renderLearningPlan();
     showToast("任务成果证据已保存");
+  }
+
+  async function clearTaskEvidence() {
+    const task = state.tasks.find((candidate) => candidate.task_key === state.evidenceTaskKey);
+    if (!task) return;
+    $("evidenceClear").disabled = true;
+    const { error } = await state.client
+      .from("learning_tasks")
+      .update({ evidence_link: null, evidence_note: null })
+      .eq("task_key", task.task_key)
+      .eq("user_id", state.session.user.id);
+    $("evidenceClear").disabled = false;
+    if (error) {
+      showToast("证据清空失败，请稍后重试", "error");
+      return;
+    }
+    task.evidence_link = null;
+    task.evidence_note = null;
+    closeEvidenceDialog();
+    renderLearningPlan();
+    showToast("任务成果证据已清空");
   }
 
   function renderGitHubActivity(activity) {
@@ -585,7 +607,7 @@
       const [events, repos] = await Promise.all([eventsResponse.json(), reposResponse.json()]);
       const since = Date.now() - 14 * 86400000;
       const recentPushes = events.filter((event) => event.type === "PushEvent" && new Date(event.created_at).getTime() >= since);
-      const commits = recentPushes.reduce((total, event) => total + (event.payload?.commits?.length || 0), 0);
+      const commits = recentPushes.length;
       const activeRepoNames = new Set(recentPushes.map((event) => event.repo?.name).filter(Boolean));
       const activity = {
         commits,
@@ -1108,6 +1130,7 @@
     });
     $("evidenceClose").addEventListener("click", closeEvidenceDialog);
     $("evidenceCancel").addEventListener("click", closeEvidenceDialog);
+    $("evidenceClear").addEventListener("click", clearTaskEvidence);
     $("evidenceDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) closeEvidenceDialog();
     });
