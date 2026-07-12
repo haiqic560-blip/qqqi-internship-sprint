@@ -21,6 +21,7 @@
     evidenceTaskKey: null,
     githubLoading: false,
     githubActivity: null,
+    formDirty: false,
   };
 
   const AUTH_CONTENT = {
@@ -250,7 +251,7 @@
   function setLoading(loading, label = "正在同步") {
     state.loading = loading;
     const sync = $("syncState");
-    sync.textContent = loading ? label : "已同步";
+    sync.textContent = loading ? (label.endsWith("…") ? label : `${label}…`) : "已同步";
     sync.dataset.loading = String(loading);
     document.querySelectorAll("[data-cloud-action]").forEach((element) => {
       element.disabled = loading;
@@ -261,6 +262,16 @@
     if (!value) return "";
     return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric" })
       .format(new Date(`${value}T00:00:00+08:00`));
+  }
+
+  function formatCompactDate(value) {
+    if (!value) return "--";
+    return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" })
+      .format(new Date(`${value}T00:00:00+08:00`));
+  }
+
+  function formatNumber(value) {
+    return new Intl.NumberFormat("zh-CN").format(Number(value) || 0);
   }
 
   function getShanghaiDateString(date = new Date()) {
@@ -390,7 +401,7 @@
       copy.append(make("h3", "", stage.title), make("p", "", stage.objective));
       const progress = make("div", "stage-progress");
       const progressText = make("div", "");
-      progressText.append(make("span", "", "任务进度"), make("strong", "", `${completed} / ${tasks.length}`));
+      progressText.append(make("span", "", "任务进度"), make("strong", "", `${formatNumber(completed)} / ${formatNumber(tasks.length)}`));
       const mini = make("div", "mini-progress");
       const bar = make("i", "");
       bar.style.width = `${percent}%`;
@@ -435,7 +446,7 @@
     evidence.type = "button";
     evidence.dataset.evidenceTaskKey = task.task_key;
     evidence.setAttribute("aria-label", `${evidence.textContent}：“${task.title}”`);
-    const status = make("button", "status-cycle", task.status);
+    const status = make("button", "status-cycle", state.taskLoadingKey === task.task_key ? "更新中…" : task.status);
     status.type = "button";
     status.dataset.taskKey = task.task_key;
     status.dataset.status = task.status;
@@ -450,7 +461,7 @@
     taskBoard.replaceChildren();
     const tasks = getStageTasks(stage.key);
     $("taskSectionTitle").textContent = `${stage.title}任务`;
-    $("taskCount").textContent = `${tasks.length} 项`;
+    $("taskCount").textContent = `${formatNumber(tasks.length)} 项`;
     const groups = new Map();
     tasks.forEach((task) => {
       if (!groups.has(task.category)) groups.set(task.category, []);
@@ -459,8 +470,9 @@
 
     groups.forEach((groupTasks, category) => {
       const group = make("section", "task-group");
+      group.dataset.category = category;
       const groupTitle = make("h3", "task-group-title", category);
-      groupTitle.append(make("span", "", `${groupTasks.filter((task) => task.status === "已完成").length} / ${groupTasks.length} 完成`));
+      groupTitle.append(make("span", "", `${formatNumber(groupTasks.filter((task) => task.status === "已完成").length)} / ${formatNumber(groupTasks.length)} 完成`));
       group.append(groupTitle);
       sortTasks(groupTasks).forEach((task) => {
         const row = make("div", "task-row");
@@ -487,7 +499,7 @@
     const tasks = getProjectTasks();
     const completed = tasks.filter((task) => task.status === "已完成").length;
     const percent = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
-    $("milestoneProgressText").textContent = `${completed} / ${tasks.length} 完成`;
+    $("milestoneProgressText").textContent = `${formatNumber(completed)} / ${formatNumber(tasks.length)} 完成`;
     $("milestoneProgressBar").style.width = `${percent}%`;
     list.replaceChildren();
     tasks.forEach((task, index) => {
@@ -513,12 +525,20 @@
     $("evidenceTaskName").textContent = task.title;
     $("evidenceLink").value = task.evidence_link || "";
     $("evidenceNote").value = task.evidence_note || "";
+    $("evidenceError").hidden = true;
+    $("evidenceError").textContent = "";
     $("evidenceClear").hidden = !(task.evidence_link || task.evidence_note);
     $("evidenceDialog").showModal();
-    window.setTimeout(() => $("evidenceLink").focus(), 0);
+    if (window.matchMedia("(min-width: 761px)").matches) {
+      window.setTimeout(() => $("evidenceLink").focus(), 0);
+    }
   }
 
-  function closeEvidenceDialog() {
+  function closeEvidenceDialog(force = false) {
+    const task = state.tasks.find((candidate) => candidate.task_key === state.evidenceTaskKey);
+    const linkChanged = task && $("evidenceLink").value.trim() !== (task.evidence_link || "");
+    const noteChanged = task && $("evidenceNote").value.trim() !== (task.evidence_note || "");
+    if (!force && (linkChanged || noteChanged) && !window.confirm("放弃尚未保存的证据修改？")) return;
     state.evidenceTaskKey = null;
     $("evidenceDialog").close();
   }
@@ -530,23 +550,30 @@
     const evidenceLink = String(data.get("evidence_link") || "").trim() || null;
     const evidenceNote = String(data.get("evidence_note") || "").trim() || null;
     if (!evidenceLink && !evidenceNote) {
-      showToast("请填写成果链接或证据说明", "error");
+      $("evidenceError").textContent = "请填写成果链接或证据说明，然后重新保存。";
+      $("evidenceError").hidden = false;
+      $("evidenceLink").focus();
       return;
     }
+    $("evidenceError").hidden = true;
+    form.setAttribute("aria-busy", "true");
     $("evidenceSave").disabled = true;
+    $("evidenceSave").textContent = "正在保存…";
     const { error } = await state.client
       .from("learning_tasks")
       .update({ evidence_link: evidenceLink, evidence_note: evidenceNote })
       .eq("task_key", task.task_key)
       .eq("user_id", state.session.user.id);
     $("evidenceSave").disabled = false;
+    $("evidenceSave").textContent = "保存证据";
+    form.setAttribute("aria-busy", "false");
     if (error) {
       showToast("证据保存失败，请稍后重试", "error");
       return;
     }
     task.evidence_link = evidenceLink;
     task.evidence_note = evidenceNote;
-    closeEvidenceDialog();
+    closeEvidenceDialog(true);
     renderLearningPlan();
     showToast("任务成果证据已保存");
   }
@@ -554,6 +581,7 @@
   async function clearTaskEvidence() {
     const task = state.tasks.find((candidate) => candidate.task_key === state.evidenceTaskKey);
     if (!task) return;
+    if (!window.confirm(`确定清空“${task.title}”的全部成果证据？此操作无法恢复。`)) return;
     $("evidenceClear").disabled = true;
     const { error } = await state.client
       .from("learning_tasks")
@@ -567,14 +595,14 @@
     }
     task.evidence_link = null;
     task.evidence_note = null;
-    closeEvidenceDialog();
+    closeEvidenceDialog(true);
     renderLearningPlan();
     showToast("任务成果证据已清空");
   }
 
   function renderGitHubActivity(activity) {
-    $("githubCommits").textContent = String(activity.commits);
-    $("githubRepos").textContent = String(activity.activeRepos);
+    $("githubCommits").textContent = formatNumber(activity.commits);
+    $("githubRepos").textContent = formatNumber(activity.activeRepos);
     const list = $("githubRepoList");
     list.replaceChildren();
     activity.repos.slice(0, 4).forEach((repo) => {
@@ -634,7 +662,6 @@
       localStorage.setItem(GITHUB_CACHE_KEY, JSON.stringify(activity));
       renderGitHubActivity(activity);
     } catch (error) {
-      console.error(error);
       $("githubState").textContent = "暂时无法连接 GitHub，点击“刷新”可重试；任务数据不受影响。";
     } finally {
       state.githubLoading = false;
@@ -679,13 +706,13 @@
     $("stageTitle").textContent = stage.title;
     $("stageObjective").textContent = stage.objective;
     $("stageDates").textContent = stage.period;
-    $("stageProgressText").textContent = tasks.length ? `${completed} / ${tasks.length}` : "路线尚未初始化";
+    $("stageProgressText").textContent = tasks.length ? `${formatNumber(completed)} / ${formatNumber(tasks.length)}` : "路线尚未初始化";
     $("stageProgressBar").style.transform = `scaleX(${percent / 100})`;
     $("stageProgressTrack").setAttribute("aria-valuenow", String(percent));
-    $("nextCheckpointDate").firstChild.textContent = checkpoint.date.slice(5).replace("-", "/");
+    $("nextCheckpointDate").firstChild.textContent = formatCompactDate(checkpoint.date);
     $("nextCheckpointTitle").textContent = checkpoint.title;
-    $("completedTasks").textContent = String(completed);
-    $("completedTasksDetail").textContent = `/ ${tasks.length} 项任务`;
+    $("completedTasks").textContent = formatNumber(completed);
+    $("completedTasksDetail").textContent = `/ ${formatNumber(tasks.length)} 项任务`;
     $("nextAction").textContent = nextTask ? nextTask.title : "完成阶段复盘，确认下一阶段重点";
     $("actionSummary").textContent = `${phase} · 下一交付：${formatDate(checkpoint.date)} ${checkpoint.title}`;
     $("daysRemaining").textContent = stage.end
@@ -702,8 +729,8 @@
   }
 
   function render() {
-    $("total").textContent = String(state.records.length);
-    $("count").textContent = `${state.records.length} 条`;
+    $("total").textContent = formatNumber(state.records.length);
+    $("count").textContent = `${formatNumber(state.records.length)} 条`;
     if (state.tasks.length) renderLearningPlan();
 
     const timeline = $("timeline");
@@ -852,7 +879,7 @@
       task.status = previousStatus;
       task.completed_at = previousCompletedAt;
       renderLearningPlan();
-      showToast("任务状态更新失败，已恢复原状态", "error");
+      showToast("任务状态更新失败，已恢复原状态；请检查网络后重试", "error");
       return;
     }
     renderLearningPlan();
@@ -932,7 +959,7 @@
       await ensureRoadmapTasks();
       await loadRecords();
       await migrateLocalRecords();
-      loadGitHubActivity().catch(console.error);
+      loadGitHubActivity().catch(() => {});
     } catch (error) {
       state.activeUserId = null;
       throw error;
@@ -972,7 +999,6 @@
       try {
         await applySession(data.session);
       } catch (syncError) {
-        console.error(syncError);
         setAuthMessage("账号已登录，但云端记录暂时无法读取。请稍后刷新页面重试。", "error");
       }
     } catch (error) {
@@ -984,6 +1010,7 @@
   }
 
   async function signOut() {
+    if (state.formDirty && !window.confirm("当前双周总结尚未保存，仍要退出吗？")) return;
     setLoading(true, "正在退出");
     const { error } = await state.client.auth.signOut({ scope: "local" });
     setLoading(false);
@@ -991,12 +1018,17 @@
       showToast("退出失败，请重试", "error");
       return;
     }
+    state.formDirty = false;
     await applySession(null);
     setAuthMode("signin");
   }
 
   async function createRecord(form) {
     const data = new FormData(form);
+    const saveButton = form.querySelector('[data-cloud-action="save"]');
+    const defaultLabel = saveButton.innerHTML;
+    form.setAttribute("aria-busy", "true");
+    saveButton.textContent = "正在保存…";
     setLoading(true, "正在保存");
     const payload = {
       user_id: state.session.user.id,
@@ -1017,16 +1049,21 @@
       .single();
     if (error) {
       setLoading(false);
+      form.setAttribute("aria-busy", "false");
+      saveButton.innerHTML = defaultLabel;
       showToast(error.message || "保存失败，请检查填写内容", "error");
       throw error;
     }
     state.records.push(saved);
     render();
     form.reset();
+    state.formDirty = false;
     form.querySelector('[value="进行中"]').checked = true;
     setDefaultDates();
     renderTaskChoices(getCurrentStage(), getShanghaiDateString());
     setLoading(false);
+    form.setAttribute("aria-busy", "false");
+    saveButton.innerHTML = defaultLabel;
     showToast("本期成果已保存到云端");
   }
 
@@ -1041,7 +1078,7 @@
       .eq("id", id);
     if (error) {
       setLoading(false);
-      showToast("状态更新失败", "error");
+      showToast("状态更新失败，请检查网络后重试", "error");
       return;
     }
     record.status = nextStatus;
@@ -1050,23 +1087,14 @@
   }
 
   async function deleteRecord(button) {
-    if (button.dataset.confirmDelete !== "true") {
-      button.dataset.confirmDelete = "true";
-      button.textContent = "再次点击确认";
-      window.setTimeout(() => {
-        if (button.isConnected) {
-          button.dataset.confirmDelete = "false";
-          button.textContent = "删除";
-        }
-      }, 4000);
-      return;
-    }
     const id = button.dataset.id;
+    const record = state.records.find((item) => item.id === id);
+    if (!record || !window.confirm(`确定删除“${record.period}”？删除后无法恢复。`)) return;
     setLoading(true, "正在删除");
     const { error } = await state.client.from("progress_entries").delete().eq("id", id);
     if (error) {
       setLoading(false);
-      showToast("删除失败", "error");
+      showToast("删除失败，请检查网络后重试", "error");
       return;
     }
     state.records = state.records.filter((item) => item.id !== id);
@@ -1118,9 +1146,15 @@
     $("signOut").addEventListener("click", signOut);
     $("fontScale").addEventListener("click", toggleFontScale);
     $("export").addEventListener("click", exportRecords);
+    $("form").addEventListener("input", () => { state.formDirty = true; });
     $("form").addEventListener("submit", async (event) => {
       event.preventDefault();
       try { await createRecord(event.currentTarget); } catch { /* surfaced in toast */ }
+    });
+    window.addEventListener("beforeunload", (event) => {
+      if (!state.formDirty) return;
+      event.preventDefault();
+      event.returnValue = "";
     });
     $("timeline").addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-cloud-action]");
@@ -1144,9 +1178,13 @@
       event.preventDefault();
       await saveTaskEvidence(event.currentTarget);
     });
-    $("evidenceClose").addEventListener("click", closeEvidenceDialog);
-    $("evidenceCancel").addEventListener("click", closeEvidenceDialog);
+    $("evidenceClose").addEventListener("click", () => closeEvidenceDialog());
+    $("evidenceCancel").addEventListener("click", () => closeEvidenceDialog());
     $("evidenceClear").addEventListener("click", clearTaskEvidence);
+    $("evidenceDialog").addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeEvidenceDialog();
+    });
     $("evidenceDialog").addEventListener("click", (event) => {
       if (event.target === event.currentTarget) closeEvidenceDialog();
     });
@@ -1168,7 +1206,7 @@
     if (error) setAuthMessage("登录状态读取失败，请刷新页面。", "error");
     await applySession(data.session);
     state.client.auth.onAuthStateChange((_event, session) => {
-      window.setTimeout(() => { applySession(session).catch(console.error); }, 0);
+      window.setTimeout(() => { applySession(session).catch(() => {}); }, 0);
     });
   }
 
@@ -1184,7 +1222,6 @@
     migrateLocalRecords,
   };
   init().catch((error) => {
-    console.error(error);
     setAuthMessage("云端服务初始化失败，请稍后重试。", "error");
   });
 })();
