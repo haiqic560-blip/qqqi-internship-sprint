@@ -5,6 +5,7 @@
   const MIGRATION_KEY = "qqqi-cloud-migration-v1";
   const GITHUB_CACHE_KEY = "qqqi-github-activity-v1";
   const GITHUB_CACHE_TTL = 15 * 60 * 1000;
+  const FONT_SCALE_KEY = "qqqi-font-scale-v1";
   const config = window.QQQI_SUPABASE_CONFIG || {};
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -230,6 +231,20 @@
     toast.hidden = false;
     clearTimeout(showToast.timer);
     showToast.timer = window.setTimeout(() => { toast.hidden = true; }, 3600);
+  }
+
+  function applyFontScale(enabled) {
+    document.body.dataset.fontScale = enabled ? "xl" : "comfortable";
+    const button = $("fontScale");
+    button.setAttribute("aria-pressed", String(enabled));
+    button.textContent = enabled ? "字号 标准" : "字号 A+";
+  }
+
+  function toggleFontScale() {
+    const enabled = document.body.dataset.fontScale !== "xl";
+    applyFontScale(enabled);
+    localStorage.setItem(FONT_SCALE_KEY, enabled ? "xl" : "comfortable");
+    showToast(enabled ? "已切换为超大字号" : "已恢复舒适字号");
   }
 
   function setLoading(loading, label = "正在同步") {
@@ -665,7 +680,7 @@
     $("stageObjective").textContent = stage.objective;
     $("stageDates").textContent = stage.period;
     $("stageProgressText").textContent = tasks.length ? `${completed} / ${tasks.length}` : "路线尚未初始化";
-    $("stageProgressBar").style.width = `${percent}%`;
+    $("stageProgressBar").style.transform = `scaleX(${percent / 100})`;
     $("stageProgressTrack").setAttribute("aria-valuenow", String(percent));
     $("nextCheckpointDate").firstChild.textContent = checkpoint.date.slice(5).replace("-", "/");
     $("nextCheckpointTitle").textContent = checkpoint.title;
@@ -1101,6 +1116,7 @@
       try { await authenticate(email, password); } catch { /* surfaced in the form */ }
     });
     $("signOut").addEventListener("click", signOut);
+    $("fontScale").addEventListener("click", toggleFontScale);
     $("export").addEventListener("click", exportRecords);
     $("form").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -1139,6 +1155,7 @@
 
   async function init() {
     bindEvents();
+    applyFontScale(localStorage.getItem(FONT_SCALE_KEY) === "xl");
     setDefaultDates();
     if (!window.supabase || !config.url || !config.publishableKey) {
       setAuthMessage("云端服务尚未完成配置，请稍后再试。", "error");
