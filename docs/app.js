@@ -6,6 +6,8 @@
   const GITHUB_CACHE_KEY = "qqqi-github-activity-v1";
   const GITHUB_CACHE_TTL = 15 * 60 * 1000;
   const FONT_SCALE_KEY = "qqqi-font-scale-v1";
+  const BIWEEKLY_ANCHOR = "2026-07-18";
+  const BIWEEKLY_DAYS = 14;
   const config = window.QQQI_SUPABASE_CONFIG || {};
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -298,6 +300,56 @@
     return Math.ceil((dateValue(to) - dateValue(from)) / 86400000);
   }
 
+  function getDatePart(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : getShanghaiDateString(date);
+  }
+
+  function getBiweeklyWindow(index) {
+    const start = shiftDate(BIWEEKLY_ANCHOR, Math.max(0, index) * BIWEEKLY_DAYS);
+    return { index: Math.max(0, index), start, end: shiftDate(start, BIWEEKLY_DAYS - 1) };
+  }
+
+  function recordMatchesWindow(record, window) {
+    return record.period_start === window.start && record.period_end === window.end;
+  }
+
+  function getBiweeklySubmissionState(today = getShanghaiDateString()) {
+    const elapsed = daysBetween(BIWEEKLY_ANCHOR, today);
+    const currentIndex = Math.max(0, Math.floor(elapsed / BIWEEKLY_DAYS));
+    const submitted = new Set(state.records.map((record) => `${record.period_start}|${record.period_end}`));
+    const isSubmitted = (window) => submitted.has(`${window.start}|${window.end}`);
+    let target = null;
+    for (let index = 0; index <= currentIndex; index += 1) {
+      const candidate = getBiweeklyWindow(index);
+      if (candidate.end < today && !isSubmitted(candidate)) {
+        target = candidate;
+        break;
+      }
+    }
+    const current = getBiweeklyWindow(currentIndex);
+    if (!target && !isSubmitted(current)) target = current;
+    const currentSubmitted = isSubmitted(current);
+    if (!target) target = getBiweeklyWindow(currentIndex + 1);
+    const remaining = daysBetween(today, target.end);
+    const overdue = target.end < today;
+    return {
+      window: target,
+      remaining,
+      state: overdue ? "overdue" : currentSubmitted ? "submitted" : remaining <= 3 ? "soon" : "upcoming",
+      submitted: currentSubmitted,
+    };
+  }
+
+  function getRollingBiweeklyWindows(today = getShanghaiDateString()) {
+    return Array.from({ length: 6 }, (_, index) => {
+      const offset = (5 - index) * BIWEEKLY_DAYS;
+      const end = shiftDate(today, -offset);
+      return { start: shiftDate(end, -(BIWEEKLY_DAYS - 1)), end };
+    });
+  }
+
   function getCurrentStage(today = getShanghaiDateString()) {
     return ROADMAP_STAGES.find((stage) => {
       if (today < stage.start) return false;
@@ -333,29 +385,61 @@
     });
   }
 
+  function getTodayActions(stage, today) {
+    const candidates = getStageTasks(stage.key).filter((task) => {
+      if (task.cadence !== "一次") return false;
+      const completedToday = task.status === "已完成" && getDatePart(task.completed_at) === today;
+      if (completedToday) return true;
+      if (task.status === "已完成") return false;
+      return !task.target_start || task.target_start <= today || daysBetween(today, task.target_start) <= 14;
+    });
+    return candidates.sort((a, b) => {
+      const rank = (task) => {
+        if (task.status === "已完成" && getDatePart(task.completed_at) === today) return 0;
+        if (task.status === "进行中") return 1;
+        if (task.target_end && task.target_end < today) return 2;
+        return 3;
+      };
+      if (rank(a) !== rank(b)) return rank(a) - rank(b);
+      const due = String(a.target_end || "9999-12-31").localeCompare(String(b.target_end || "9999-12-31"));
+      return due || Number(b.priority) - Number(a.priority);
+    }).slice(0, 3);
+  }
+
   function renderFocus(stage, today) {
     const focusList = $("focusList");
     focusList.replaceChildren();
-    const candidates = sortTasks(getStageTasks(stage.key).filter((task) => {
-      if (task.status === "已完成") return false;
-      if (!task.target_start) return true;
-      return task.target_start <= today || daysBetween(today, task.target_start) <= 14;
-    })).slice(0, 3);
+    const candidates = getTodayActions(stage, today);
+    const completed = candidates.filter((task) => task.status === "已完成").length;
+    const percent = candidates.length ? Math.round((completed / candidates.length) * 100) : 100;
+    $("todayDate").textContent = `${formatDate(today)} · 每天只推进最重要的三件事`;
+    $("todayDate").dateTime = today;
+    $("todayProgressText").textContent = `${formatNumber(completed)} / ${formatNumber(candidates.length)}`;
+    $("todayProgressBar").style.transform = `scaleX(${percent / 100})`;
+    $("todayProgressTrack").setAttribute("aria-valuenow", String(percent));
 
     if (!candidates.length) {
       const empty = make("div", "empty");
-      empty.append(make("strong", "", "当前重点已清空"), make("p", "", "可以进入下一阶段，或先完成一次阶段复盘。"));
+      empty.append(make("strong", "", "今日重点已完成"), make("p", "", "可以整理成果证据，或提前准备下一项任务。"));
       focusList.append(empty);
       return;
     }
 
     candidates.forEach((task, index) => {
-      const item = make("div", "focus-item");
+      const item = make("div", "focus-item daily-focus-item");
+      item.dataset.status = task.status;
       const copy = make("div", "");
       copy.append(make("h4", "", task.title), make("p", "", task.detail));
-      const status = make("span", "focus-status", task.status);
-      status.dataset.status = task.status;
-      item.append(make("span", "focus-number", String(index + 1).padStart(2, "0")), copy, status);
+      const action = make("button", "daily-action");
+      action.type = "button";
+      action.dataset.taskKey = task.task_key;
+      action.dataset.status = task.status;
+      action.disabled = task.status === "已完成" || state.taskLoadingKey === task.task_key;
+      action.textContent = state.taskLoadingKey === task.task_key
+        ? "更新中…"
+        : task.status === "未开始" ? "开始任务" : task.status === "进行中" ? "标记完成" : "今日已完成";
+      action.setAttribute("aria-label", `${action.textContent}：“${task.title}”`);
+      item.append(make("span", "focus-number", String(index + 1).padStart(2, "0")), copy, action);
       focusList.append(item);
     });
   }
@@ -380,6 +464,104 @@
       item.append(make("strong", "", task.cadence), copy);
       rhythmList.append(item);
     });
+  }
+
+  function renderBiweeklyReminder(today = getShanghaiDateString()) {
+    const submission = getBiweeklySubmissionState(today);
+    const { window, remaining } = submission;
+    const overdueDays = Math.abs(Math.min(0, remaining));
+    const stateLabel = submission.state === "overdue"
+      ? "已逾期"
+      : submission.state === "submitted" ? "已提交" : remaining === 0 ? "今天截止" : remaining <= 3 ? "临近截止" : "待提交";
+    $("submissionReminder").dataset.state = submission.state;
+    $("submissionCountdown").textContent = formatNumber(submission.state === "overdue" ? overdueDays : Math.max(0, remaining));
+    $("submissionCountdownUnit").textContent = submission.state === "overdue" ? "天逾期" : "天后";
+    $("submissionDueDate").textContent = `${formatDate(window.end)} · ${stateLabel}`;
+    $("submissionDueDate").dateTime = window.end;
+
+    const [, month, day] = window.end.split("-");
+    $("deadlineBanner").dataset.state = submission.state;
+    $("deadlineDateTime").dateTime = window.end;
+    $("deadlineDay").textContent = day;
+    $("deadlineMonth").textContent = `${Number(month)}月提交`;
+    $("deadlineState").textContent = stateLabel;
+    $("deadlineTitle").textContent = submission.state === "overdue"
+      ? `本期总结已逾期 ${formatNumber(overdueDays)} 天`
+      : submission.state === "submitted"
+        ? `本期已完成，下一次 ${formatDate(window.end)} 提交`
+        : remaining === 0 ? "今天完成本期双周总结" : `距离本期提交还有 ${formatNumber(remaining)} 天`;
+    $("deadlineMessage").textContent = `${formatDate(window.start)}—${formatDate(window.end)} · 工作记录、成果链接与复盘总结`;
+  }
+
+  function renderGrowthAnalytics(today = getShanghaiDateString()) {
+    const stage = getCurrentStage(today);
+    const tasks = getStageTasks(stage.key);
+    const completed = tasks.filter((task) => task.status === "已完成");
+    const recentStart = shiftDate(today, -13);
+    const recentCompleted = completed.filter((task) => {
+      const date = getDatePart(task.completed_at);
+      return date && date >= recentStart && date <= today;
+    });
+    const evidenceCount = completed.filter((task) => task.evidence_link || task.evidence_note).length;
+    const evidenceRate = completed.length ? Math.round((evidenceCount / completed.length) * 100) : 0;
+    $("analyticsCompleted").textContent = formatNumber(completed.length);
+    $("analyticsCompletedDetail").textContent = `/ ${formatNumber(tasks.length)} 项`;
+    $("analyticsRecent").textContent = formatNumber(recentCompleted.length);
+    $("analyticsEvidence").textContent = completed.length ? `${formatNumber(evidenceRate)}%` : "—";
+    $("analyticsEvidenceDetail").textContent = completed.length ? `${formatNumber(evidenceCount)} / ${formatNumber(completed.length)} 项有证据` : "尚无已完成任务";
+    $("analyticsGithub").textContent = state.githubActivity ? formatNumber(state.githubActivity.commits) : "—";
+
+    const windows = getRollingBiweeklyWindows(today);
+    const counts = windows.map((window) => completed.filter((task) => {
+      const date = getDatePart(task.completed_at);
+      return date && date >= window.start && date <= window.end;
+    }).length);
+    const max = Math.max(1, ...counts);
+    const trend = $("growthTrend");
+    trend.replaceChildren();
+    windows.forEach((window, index) => {
+      const count = counts[index];
+      const submitted = state.records.some((record) => {
+        const date = record.period_end || getDatePart(record.created_at);
+        return date && date >= window.start && date <= window.end;
+      });
+      const period = make("div", "trend-period");
+      period.setAttribute("role", "listitem");
+      period.setAttribute("aria-label", `${formatDate(window.start)}至${formatDate(window.end)}：完成 ${count} 项任务${submitted ? "，已提交双周总结" : ""}`);
+      const value = make("span", "trend-value", formatNumber(count));
+      const barWrap = make("div", "trend-bar-wrap");
+      const bar = make("div", "trend-bar");
+      bar.dataset.empty = String(count === 0);
+      bar.dataset.submitted = String(submitted);
+      bar.style.setProperty("--bar-height", `${count ? 18 + Math.round((count / max) * 90) : 4}px`);
+      barWrap.append(bar);
+      const label = document.createElement("time");
+      label.dateTime = window.end;
+      label.textContent = formatCompactDate(window.end);
+      period.append(value, barWrap, label);
+      trend.append(period);
+    });
+    const total = counts.reduce((sum, count) => sum + count, 0);
+    $("trendTotal").textContent = `${formatNumber(total)} 项完成`;
+    $("analysisWindow").textContent = `${formatDate(windows[0].start)}—${formatDate(today)}`;
+
+    const submission = getBiweeklySubmissionState(today);
+    if (submission.state === "overdue") {
+      $("growthInsight").textContent = "先补齐逾期的双周总结";
+      $("growthInsightDetail").textContent = "记录当前真实进度，再继续推进新任务，避免成长证据出现空档。";
+    } else if (!completed.length) {
+      $("growthInsight").textContent = "先完成今天的第一项行动";
+      $("growthInsightDetail").textContent = "完成状态和成果证据会自动汇入这里，不需要重复填写。";
+    } else if (evidenceRate < 80) {
+      $("growthInsight").textContent = "为已完成任务补上成果证据";
+      $("growthInsightDetail").textContent = `目前 ${formatNumber(evidenceCount)} 项有证据，优先补充 GitHub、笔记或演示链接。`;
+    } else if (recentCompleted.length >= 3) {
+      $("growthInsight").textContent = "最近两周推进节奏很好";
+      $("growthInsightDetail").textContent = "继续保持少而稳定的节奏，并在双周总结里写清最重要的技术收获。";
+    } else {
+      $("growthInsight").textContent = "保持每天少量推进";
+      $("growthInsightDetail").textContent = "优先完成今日行动，不用同时展开更多学习方向。";
+    }
   }
 
   function renderRoadmap(currentStage, today) {
@@ -618,6 +800,7 @@
     if (!activity.repos.length) list.append(make("p", "github-state", "还没有可展示的公开仓库。"));
     const syncedAt = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(activity.fetchedAt));
     $("githubState").textContent = `公开数据 · ${syncedAt} 同步 · 不需要访问令牌`;
+    renderGrowthAnalytics();
   }
 
   async function loadGitHubActivity(force = false) {
@@ -726,12 +909,18 @@
     renderTaskBoard(stage);
     renderMilestones();
     renderTaskChoices(stage, today);
+    renderBiweeklyReminder(today);
+    renderGrowthAnalytics(today);
   }
 
   function render() {
     $("total").textContent = formatNumber(state.records.length);
     $("count").textContent = `${formatNumber(state.records.length)} 条`;
     if (state.tasks.length) renderLearningPlan();
+    else {
+      renderBiweeklyReminder();
+      renderGrowthAnalytics();
+    }
 
     const timeline = $("timeline");
     timeline.replaceChildren();
@@ -899,6 +1088,7 @@
       throw error;
     }
     state.records = data || [];
+    if (!state.formDirty) setDefaultDates();
     render();
     setLoading(false);
   }
@@ -1025,6 +1215,12 @@
 
   async function createRecord(form) {
     const data = new FormData(form);
+    const periodStart = String(data.get("period_start") || "");
+    const periodEnd = String(data.get("period_end") || "");
+    if (state.records.some((record) => recordMatchesWindow(record, { start: periodStart, end: periodEnd }))) {
+      showToast("这个双周周期已经提交过；如需重填，请先删除原记录", "error");
+      return;
+    }
     const saveButton = form.querySelector('[data-cloud-action="save"]');
     const defaultLabel = saveButton.innerHTML;
     form.setAttribute("aria-busy", "true");
@@ -1033,8 +1229,8 @@
     const payload = {
       user_id: state.session.user.id,
       period: String(data.get("period") || ""),
-      period_start: String(data.get("period_start") || ""),
-      period_end: String(data.get("period_end") || ""),
+      period_start: periodStart,
+      period_end: periodEnd,
       work: String(data.get("work") || ""),
       link: String(data.get("link") || "") || null,
       review: String(data.get("review") || ""),
@@ -1098,6 +1294,7 @@
       return;
     }
     state.records = state.records.filter((item) => item.id !== id);
+    if (!state.formDirty) setDefaultDates();
     render();
     setLoading(false);
     showToast("记录已删除");
@@ -1121,10 +1318,10 @@
 
   function setDefaultDates() {
     const end = getShanghaiDateString();
-    const start = shiftDate(end, -13);
-    $("periodStart").value = start;
-    $("periodEnd").value = end;
-    $("stageKey").value = getCurrentStage(end).key;
+    const submission = getBiweeklySubmissionState(end);
+    $("periodStart").value = submission.window.start;
+    $("periodEnd").value = submission.window.end;
+    $("stageKey").value = getCurrentStage(submission.window.end).key;
   }
 
   function bindEvents() {
@@ -1172,6 +1369,7 @@
       if (!status || state.loading || state.taskLoadingKey) return;
       await updateTaskStatus(status.dataset.taskKey);
     };
+    $("focusList").addEventListener("click", handleTaskAction);
     $("taskBoard").addEventListener("click", handleTaskAction);
     $("milestoneList").addEventListener("click", handleTaskAction);
     $("evidenceForm").addEventListener("submit", async (event) => {
