@@ -6,6 +6,11 @@
   const GITHUB_CACHE_KEY = "qqqi-github-activity-v1";
   const GITHUB_CACHE_TTL = 15 * 60 * 1000;
   const FONT_SCALE_KEY = "qqqi-font-scale-v1";
+  const RECORD_DRAFT_KEY = "qqqi-record-draft-v2";
+  const DAILY_DRAFT_KEY = "qqqi-daily-draft-v1";
+  const UPLOAD_BUCKET = "qqqi-uploads";
+  const MAX_UPLOAD_FILES = 3;
+  const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
   const BIWEEKLY_ANCHOR = "2026-07-18";
   const BIWEEKLY_DAYS = 14;
   const config = window.QQQI_SUPABASE_CONFIG || {};
@@ -15,6 +20,7 @@
     session: null,
     records: [],
     tasks: [],
+    dailyLogs: [],
     loading: false,
     authLoading: false,
     authMode: "signin",
@@ -24,6 +30,9 @@
     githubLoading: false,
     githubActivity: null,
     formDirty: false,
+    dailyFormDirty: false,
+    editingRecordId: null,
+    editingDailyLogId: null,
   };
 
   const AUTH_CONTENT = {
@@ -234,6 +243,137 @@
     toast.hidden = false;
     clearTimeout(showToast.timer);
     showToast.timer = window.setTimeout(() => { toast.hidden = true; }, 3600);
+  }
+
+  function userStorageKey(base) {
+    return `${base}:${state.activeUserId || "anonymous"}`;
+  }
+
+  function readDraft(base) {
+    try { return JSON.parse(localStorage.getItem(userStorageKey(base)) || "null"); }
+    catch { return null; }
+  }
+
+  function saveRecordDraft() {
+    if (!state.activeUserId || state.editingRecordId) return;
+    const data = new FormData($("form"));
+    localStorage.setItem(userStorageKey(RECORD_DRAFT_KEY), JSON.stringify({
+      period: String(data.get("period") || ""),
+      period_start: String(data.get("period_start") || ""),
+      period_end: String(data.get("period_end") || ""),
+      work: String(data.get("work") || ""),
+      link: String(data.get("link") || ""),
+      review: String(data.get("review") || ""),
+      status: String(data.get("status") || "进行中"),
+      roadmap_task_keys: data.getAll("roadmap_task_keys").map(String),
+      saved_at: new Date().toISOString(),
+    }));
+    $("recordDraftState").textContent = navigator.onLine ? "文字草稿已保存在此设备。" : "离线草稿已保存，联网后即可同步。";
+    $("recordDraftState").dataset.saved = "true";
+  }
+
+  function restoreRecordDraft() {
+    if (!state.activeUserId || state.editingRecordId) return;
+    const draft = readDraft(RECORD_DRAFT_KEY);
+    if (!draft) return;
+    const form = $("form");
+    ["period", "period_start", "period_end", "work", "link", "review"].forEach((name) => {
+      const field = form.elements.namedItem(name);
+      if (field && draft[name] !== undefined) field.value = draft[name];
+    });
+    const status = form.querySelector(`[name="status"][value="${draft.status || "进行中"}"]`);
+    if (status) status.checked = true;
+    const selected = new Set(draft.roadmap_task_keys || []);
+    form.querySelectorAll('[name="roadmap_task_keys"]').forEach((input) => { input.checked = selected.has(input.value); });
+    state.formDirty = true;
+    $("recordDraftState").textContent = "已恢复此设备上的文字草稿。";
+    $("recordDraftState").dataset.saved = "true";
+  }
+
+  function clearRecordDraft() {
+    localStorage.removeItem(userStorageKey(RECORD_DRAFT_KEY));
+    $("recordDraftState").textContent = "输入内容会自动保存为本地草稿。";
+    delete $("recordDraftState").dataset.saved;
+  }
+
+  function saveDailyDraft() {
+    if (!state.activeUserId || state.editingDailyLogId) return;
+    const data = new FormData($("dailyLogForm"));
+    localStorage.setItem(userStorageKey(DAILY_DRAFT_KEY), JSON.stringify({
+      log_date: String(data.get("log_date") || ""),
+      minutes: String(data.get("minutes") || ""),
+      subject: String(data.get("subject") || ""),
+      summary: String(data.get("summary") || ""),
+      saved_at: new Date().toISOString(),
+    }));
+    $("dailyDraftState").textContent = navigator.onLine ? "今日记录草稿已保存在此设备。" : "离线草稿已保存，联网后即可同步。";
+  }
+
+  function restoreDailyDraft() {
+    if (!state.activeUserId || state.editingDailyLogId) return;
+    const draft = readDraft(DAILY_DRAFT_KEY);
+    if (!draft) return;
+    const form = $("dailyLogForm");
+    ["log_date", "minutes", "subject", "summary"].forEach((name) => {
+      const field = form.elements.namedItem(name);
+      if (field && draft[name] !== undefined) field.value = draft[name];
+    });
+    state.dailyFormDirty = true;
+    $("dailyDraftState").textContent = "已恢复此设备上的今日记录草稿。";
+  }
+
+  function clearDailyDraft() {
+    localStorage.removeItem(userStorageKey(DAILY_DRAFT_KEY));
+    $("dailyDraftState").textContent = "输入内容会自动保存为本地草稿。";
+  }
+
+  function updateConnectionState() {
+    $("connectionBanner").hidden = navigator.onLine;
+    if (!navigator.onLine) {
+      $("recordDraftState").textContent = "当前离线：文字仍会保存，附件需联网后上传。";
+      $("dailyDraftState").textContent = "当前离线：记录会保存在此设备。";
+    }
+  }
+
+  function formatMinutes(minutes) {
+    const total = Number(minutes) || 0;
+    const hours = Math.floor(total / 60);
+    const rest = total % 60;
+    if (!hours) return `${rest} 分钟`;
+    return rest ? `${hours} 小时 ${rest} 分钟` : `${hours} 小时`;
+  }
+
+  function safeFileName(name) {
+    return name.normalize("NFKC").replace(/[^\p{L}\p{N}._-]+/gu, "-").slice(-100) || "file";
+  }
+
+  function fileContentType(file) {
+    if (file.type) return file.type;
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    return ({
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp",
+      pdf: "application/pdf", txt: "text/plain", md: "text/markdown", zip: "application/zip",
+    })[extension] || "application/octet-stream";
+  }
+
+  function selectedUploadFiles() {
+    return [...($("recordFiles").files || [])];
+  }
+
+  function validateUploadFiles(files) {
+    if (files.length > MAX_UPLOAD_FILES) return `每次最多上传 ${MAX_UPLOAD_FILES} 个文件`;
+    const large = files.find((file) => file.size > MAX_UPLOAD_BYTES);
+    return large ? `“${large.name}”超过 10MB` : "";
+  }
+
+  function renderSelectedFiles() {
+    const host = $("selectedFiles");
+    host.replaceChildren();
+    const files = selectedUploadFiles();
+    if (!files.length) return;
+    const error = validateUploadFiles(files);
+    if (error) host.append(make("span", "selected-file file-error", error));
+    files.forEach((file) => host.append(make("span", "selected-file", `${file.name} · ${Math.max(1, Math.ceil(file.size / 1024))}KB`)));
   }
 
   function applyFontScale(enabled) {
@@ -982,6 +1122,20 @@
         content.append(feedback);
       }
 
+      const attachments = Array.isArray(item.attachments) ? item.attachments : [];
+      if (attachments.length) {
+        const attachmentList = make("div", "record-attachments");
+        attachments.forEach((attachment) => {
+          const open = make("button", "attachment-open", `附件：${attachment.name || "查看文件"}`);
+          open.type = "button";
+          open.dataset.cloudAction = "open-attachment";
+          open.dataset.attachmentPath = attachment.path;
+          open.dataset.id = item.id;
+          attachmentList.append(open);
+        });
+        content.append(attachmentList);
+      }
+
       const actions = make("div", "actions");
       if (item.link) {
         const link = make("a", "", "查看成果 ↗");
@@ -990,6 +1144,12 @@
         link.rel = "noreferrer";
         actions.append(link);
       }
+      const edit = make("button", "record-edit", "修改");
+      edit.type = "button";
+      edit.dataset.cloudAction = "edit";
+      edit.dataset.id = item.id;
+      edit.setAttribute("aria-label", `修改“${item.period}”正文`);
+      actions.append(edit);
       const remove = make("button", "", "删除");
       remove.type = "button";
       remove.dataset.cloudAction = "delete";
@@ -1075,11 +1235,144 @@
     showToast(`任务已更新为“${nextStatus}”`);
   }
 
+  function renderDailyLogs() {
+    const today = getShanghaiDateString();
+    const dates = new Set(state.dailyLogs.map((log) => log.log_date));
+    const todayLog = state.dailyLogs.find((log) => log.log_date === today);
+    let cursor = dates.has(today) ? today : shiftDate(today, -1);
+    let streak = 0;
+    while (dates.has(cursor)) {
+      streak += 1;
+      cursor = shiftDate(cursor, -1);
+    }
+    const recentStart = shiftDate(today, -13);
+    const recentMinutes = state.dailyLogs
+      .filter((log) => log.log_date >= recentStart && log.log_date <= today)
+      .reduce((sum, log) => sum + Number(log.minutes || 0), 0);
+    $("todayMinutes").textContent = formatNumber(todayLog?.minutes || 0);
+    $("currentStreak").textContent = formatNumber(streak);
+    $("studyDays").textContent = formatNumber(dates.size);
+    $("fortnightHours").textContent = (recentMinutes / 60).toFixed(recentMinutes % 60 ? 1 : 0);
+    $("dailyLogCount").textContent = `${formatNumber(state.dailyLogs.length)} 条`;
+
+    const list = $("dailyLogList");
+    list.replaceChildren();
+    if (!state.dailyLogs.length) {
+      const empty = make("div", "empty");
+      empty.append(make("strong", "", "今天学了什么？"), make("p", "", "保存第一条真实学习记录后，连续打卡会从这里开始计算。"));
+      list.append(empty);
+      return;
+    }
+    state.dailyLogs.slice(0, 7).forEach((log) => {
+      const row = make("article", "study-log-entry");
+      const date = make("time", "study-log-date", formatCompactDate(log.log_date));
+      date.dateTime = log.log_date;
+      const copy = make("div", "study-log-copy");
+      copy.append(make("h4", "", log.subject), make("p", "", log.summary || "今天已完成学习打卡。"), make("span", "", formatMinutes(log.minutes)));
+      const actions = make("div", "study-log-actions");
+      const edit = make("button", "", "修改");
+      edit.type = "button";
+      edit.dataset.dailyAction = "edit";
+      edit.dataset.id = log.id;
+      const remove = make("button", "", "删除");
+      remove.type = "button";
+      remove.dataset.dailyAction = "delete";
+      remove.dataset.id = log.id;
+      actions.append(edit, remove);
+      row.append(date, copy, actions);
+      list.append(row);
+    });
+  }
+
+  async function loadDailyLogs() {
+    const { data, error } = await state.client
+      .from("daily_study_logs")
+      .select("id,user_id,log_date,minutes,subject,summary,created_at,updated_at")
+      .order("log_date", { ascending: false })
+      .limit(120);
+    if (error) throw error;
+    state.dailyLogs = data || [];
+    renderDailyLogs();
+  }
+
+  function cancelDailyEdit() {
+    state.editingDailyLogId = null;
+    state.dailyFormDirty = false;
+    $("dailyLogForm").reset();
+    $("studyDate").value = getShanghaiDateString();
+    $("cancelDailyEdit").hidden = true;
+    $("dailyLogSave").textContent = "保存今日打卡";
+    clearDailyDraft();
+  }
+
+  function editDailyLog(id) {
+    const log = state.dailyLogs.find((item) => item.id === id);
+    if (!log) return;
+    state.editingDailyLogId = id;
+    state.dailyFormDirty = true;
+    $("studyDate").value = log.log_date;
+    $("studyMinutes").value = log.minutes;
+    $("studySubject").value = log.subject;
+    $("studySummary").value = log.summary || "";
+    $("cancelDailyEdit").hidden = false;
+    $("dailyLogSave").textContent = "保存修改";
+    $("dailyDraftState").textContent = "正在修改已同步的打卡记录。";
+    $("studyLogTitle").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function saveDailyLog(form) {
+    if (!navigator.onLine) {
+      saveDailyDraft();
+      showToast("当前离线，打卡已保存为本地草稿", "error");
+      return;
+    }
+    const data = new FormData(form);
+    const payload = {
+      user_id: state.session.user.id,
+      log_date: String(data.get("log_date") || ""),
+      minutes: Number(data.get("minutes")),
+      subject: String(data.get("subject") || "").trim(),
+      summary: String(data.get("summary") || "").trim(),
+    };
+    form.setAttribute("aria-busy", "true");
+    $("dailyLogSave").disabled = true;
+    const { data: saved, error } = await state.client
+      .from("daily_study_logs")
+      .upsert(payload, { onConflict: "user_id,log_date" })
+      .select()
+      .single();
+    form.setAttribute("aria-busy", "false");
+    $("dailyLogSave").disabled = false;
+    if (error) {
+      showToast(error.message || "打卡保存失败，请稍后重试", "error");
+      return;
+    }
+    state.dailyLogs = [saved, ...state.dailyLogs.filter((log) => log.id !== saved.id && log.log_date !== saved.log_date)]
+      .sort((a, b) => b.log_date.localeCompare(a.log_date));
+    renderDailyLogs();
+    cancelDailyEdit();
+    showToast("今日学习记录已同步");
+  }
+
+  async function deleteDailyLog(id) {
+    const log = state.dailyLogs.find((item) => item.id === id);
+    if (!log || !window.confirm(`确定删除 ${formatCompactDate(log.log_date)} 的打卡吗？`)) return;
+    const { error } = await state.client.from("daily_study_logs").delete().eq("id", id).eq("user_id", state.session.user.id);
+    if (error) {
+      showToast("打卡删除失败，请稍后重试", "error");
+      return;
+    }
+    state.dailyLogs = state.dailyLogs.filter((item) => item.id !== id);
+    if (state.editingDailyLogId === id) cancelDailyEdit();
+    renderDailyLogs();
+    showToast("打卡已删除");
+  }
+
   async function loadRecords() {
     setLoading(true, "正在读取云端记录");
     const { data, error } = await state.client
       .from("progress_entries")
-      .select("id,user_id,period,period_start,period_end,work,link,review,status,feedback,stage_key,roadmap_task_keys,created_at,updated_at")
+      .select("id,user_id,period,period_start,period_end,work,link,review,status,feedback,stage_key,roadmap_task_keys,attachments,created_at,updated_at")
       .order("period_start", { ascending: true })
       .order("created_at", { ascending: true });
     if (error) {
@@ -1139,6 +1432,9 @@
     if (!signedIn) {
       state.records = [];
       state.tasks = [];
+      state.dailyLogs = [];
+      state.editingRecordId = null;
+      state.editingDailyLogId = null;
       state.activeUserId = null;
       return;
     }
@@ -1148,7 +1444,10 @@
     try {
       await ensureRoadmapTasks();
       await loadRecords();
+      await loadDailyLogs();
       await migrateLocalRecords();
+      restoreRecordDraft();
+      restoreDailyDraft();
       loadGitHubActivity().catch(() => {});
     } catch (error) {
       state.activeUserId = null;
@@ -1200,7 +1499,7 @@
   }
 
   async function signOut() {
-    if (state.formDirty && !window.confirm("当前双周总结尚未保存，仍要退出吗？")) return;
+    if ((state.formDirty || state.dailyFormDirty) && !window.confirm("当前有尚未同步的输入，仍要退出吗？")) return;
     setLoading(true, "正在退出");
     const { error } = await state.client.auth.signOut({ scope: "local" });
     setLoading(false);
@@ -1209,20 +1508,154 @@
       return;
     }
     state.formDirty = false;
+    state.dailyFormDirty = false;
     await applySession(null);
     setAuthMode("signin");
   }
 
+  function renderCurrentAttachments(record) {
+    const wrap = $("currentAttachments");
+    const list = $("currentAttachmentList");
+    list.replaceChildren();
+    const attachments = Array.isArray(record?.attachments) ? record.attachments : [];
+    wrap.hidden = !attachments.length;
+    attachments.forEach((attachment) => {
+      const chip = make("span", "attachment-chip");
+      chip.append(make("span", "", attachment.name || "附件"));
+      const open = make("button", "attachment-open", "查看");
+      open.type = "button";
+      open.dataset.currentAttachmentAction = "open";
+      open.dataset.path = attachment.path;
+      const remove = make("button", "attachment-remove", "移除");
+      remove.type = "button";
+      remove.dataset.currentAttachmentAction = "remove";
+      remove.dataset.path = attachment.path;
+      remove.dataset.id = record.id;
+      chip.append(open, remove);
+      list.append(chip);
+    });
+  }
+
+  function cancelRecordEdit({ preserveDraft = false } = {}) {
+    state.editingRecordId = null;
+    state.formDirty = false;
+    $("form").reset();
+    $("recordFiles").value = "";
+    renderSelectedFiles();
+    $("currentAttachments").hidden = true;
+    $("currentAttachmentList").replaceChildren();
+    $("recordFormEyebrow").textContent = "双周成长档案";
+    $("recordFormTitle").textContent = "提交本期成果";
+    $("recordFormBadge").textContent = "云端保存";
+    $("recordSaveButton").textContent = "保存本期成果 →";
+    $("cancelRecordEdit").hidden = true;
+    $("form").querySelector('[value="进行中"]').checked = true;
+    setDefaultDates();
+    renderTaskChoices(getCurrentStage(), getShanghaiDateString());
+    if (!preserveDraft) clearRecordDraft();
+  }
+
+  function startRecordEdit(id) {
+    const record = state.records.find((item) => item.id === id);
+    if (!record) return;
+    state.editingRecordId = id;
+    state.formDirty = true;
+    const form = $("form");
+    ["period", "period_start", "period_end", "work", "link", "review"].forEach((name) => {
+      form.elements.namedItem(name).value = record[name] || "";
+    });
+    $("stageKey").value = record.stage_key || getCurrentStage().key;
+    const status = form.querySelector(`[name="status"][value="${record.status}"]`);
+    if (status) status.checked = true;
+    renderTaskChoices(getCurrentStage(record.period_end), record.period_end);
+    const related = new Set(record.roadmap_task_keys || []);
+    form.querySelectorAll('[name="roadmap_task_keys"]').forEach((input) => { input.checked = related.has(input.value); });
+    renderCurrentAttachments(record);
+    $("recordFormEyebrow").textContent = "编辑已同步内容";
+    $("recordFormTitle").textContent = "修改双周记录";
+    $("recordFormBadge").textContent = "编辑模式";
+    $("recordSaveButton").textContent = "保存修改 →";
+    $("cancelRecordEdit").hidden = false;
+    $("recordDraftState").textContent = "正在修改云端记录；保存后会覆盖原正文。";
+    $("submit").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function uploadRecordFiles(record, files) {
+    const validation = validateUploadFiles(files);
+    if (validation) throw new Error(validation);
+    if (!files.length) return record;
+    const uploaded = [];
+    try {
+      for (const file of files) {
+        const path = `${state.session.user.id}/progress/${record.id}/${crypto.randomUUID()}-${safeFileName(file.name)}`;
+        const { error } = await state.client.storage.from(UPLOAD_BUCKET).upload(path, file, {
+          contentType: fileContentType(file),
+          upsert: false,
+        });
+        if (error) throw error;
+        uploaded.push({ path, name: file.name, type: file.type || "", size: file.size });
+      }
+      const attachments = [...(Array.isArray(record.attachments) ? record.attachments : []), ...uploaded];
+      const { data, error } = await state.client.from("progress_entries")
+        .update({ attachments }).eq("id", record.id).eq("user_id", state.session.user.id).select().single();
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      if (uploaded.length) await state.client.storage.from(UPLOAD_BUCKET).remove(uploaded.map((item) => item.path));
+      throw error;
+    }
+  }
+
+  async function openAttachment(path) {
+    const { data, error } = await state.client.storage.from(UPLOAD_BUCKET).createSignedUrl(path, 60);
+    if (error || !data?.signedUrl) {
+      showToast("附件暂时无法打开，请稍后重试", "error");
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  }
+
+  async function deleteAttachment(recordId, path) {
+    const record = state.records.find((item) => item.id === recordId);
+    if (!record || !window.confirm("确定移除这个附件吗？")) return;
+    const attachments = (record.attachments || []).filter((item) => item.path !== path);
+    const { error: storageError } = await state.client.storage.from(UPLOAD_BUCKET).remove([path]);
+    if (storageError) {
+      showToast("附件移除失败，请稍后重试", "error");
+      return;
+    }
+    const { data, error } = await state.client.from("progress_entries")
+      .update({ attachments }).eq("id", recordId).eq("user_id", state.session.user.id).select().single();
+    if (error) {
+      showToast("附件清单更新失败，请刷新后重试", "error");
+      return;
+    }
+    Object.assign(record, data);
+    render();
+    if (state.editingRecordId === recordId) renderCurrentAttachments(record);
+    showToast("附件已移除");
+  }
+
   async function createRecord(form) {
+    if (!navigator.onLine) {
+      saveRecordDraft();
+      showToast("当前离线，正文已保存为本地草稿", "error");
+      return;
+    }
     const data = new FormData(form);
     const periodStart = String(data.get("period_start") || "");
     const periodEnd = String(data.get("period_end") || "");
-    if (state.records.some((record) => recordMatchesWindow(record, { start: periodStart, end: periodEnd }))) {
-      showToast("这个双周周期已经提交过；如需重填，请先删除原记录", "error");
+    if (state.records.some((record) => record.id !== state.editingRecordId && recordMatchesWindow(record, { start: periodStart, end: periodEnd }))) {
+      showToast("这个双周周期已经提交过，请修改现有记录", "error");
       return;
     }
-    const saveButton = form.querySelector('[data-cloud-action="save"]');
-    const defaultLabel = saveButton.innerHTML;
+    const files = selectedUploadFiles();
+    const validation = validateUploadFiles(files);
+    if (validation) {
+      showToast(validation, "error");
+      return;
+    }
+    const saveButton = $("recordSaveButton");
     form.setAttribute("aria-busy", "true");
     saveButton.textContent = "正在保存…";
     setLoading(true, "正在保存");
@@ -1238,29 +1671,32 @@
       stage_key: String(data.get("stage_key") || getCurrentStage().key),
       roadmap_task_keys: data.getAll("roadmap_task_keys").map(String),
     };
-    const { data: saved, error } = await state.client
-      .from("progress_entries")
-      .insert(payload)
-      .select()
-      .single();
+    const query = state.editingRecordId
+      ? state.client.from("progress_entries").update(payload).eq("id", state.editingRecordId).eq("user_id", state.session.user.id)
+      : state.client.from("progress_entries").insert(payload);
+    const { data: saved, error } = await query.select().single();
     if (error) {
       setLoading(false);
       form.setAttribute("aria-busy", "false");
-      saveButton.innerHTML = defaultLabel;
+      saveButton.textContent = state.editingRecordId ? "保存修改 →" : "保存本期成果 →";
       showToast(error.message || "保存失败，请检查填写内容", "error");
-      throw error;
+      return;
     }
-    state.records.push(saved);
+    let finalRecord = saved;
+    let uploadError = null;
+    if (files.length) {
+      saveButton.textContent = "正在上传附件…";
+      try { finalRecord = await uploadRecordFiles(saved, files); }
+      catch (error_) { uploadError = error_; }
+    }
+    const index = state.records.findIndex((record) => record.id === finalRecord.id);
+    if (index >= 0) state.records[index] = finalRecord;
+    else state.records.push(finalRecord);
+    cancelRecordEdit();
     render();
-    form.reset();
-    state.formDirty = false;
-    form.querySelector('[value="进行中"]').checked = true;
-    setDefaultDates();
-    renderTaskChoices(getCurrentStage(), getShanghaiDateString());
     setLoading(false);
     form.setAttribute("aria-busy", "false");
-    saveButton.innerHTML = defaultLabel;
-    showToast("本期成果已保存到云端");
+    showToast(uploadError ? `正文已保存，但附件上传失败：${uploadError.message}` : "本期成果已保存到云端", uploadError ? "error" : "success");
   }
 
   async function toggleRecord(id) {
@@ -1287,13 +1723,16 @@
     const record = state.records.find((item) => item.id === id);
     if (!record || !window.confirm(`确定删除“${record.period}”？删除后无法恢复。`)) return;
     setLoading(true, "正在删除");
-    const { error } = await state.client.from("progress_entries").delete().eq("id", id);
+    const paths = (record.attachments || []).map((item) => item.path).filter(Boolean);
+    if (paths.length) await state.client.storage.from(UPLOAD_BUCKET).remove(paths);
+    const { error } = await state.client.from("progress_entries").delete().eq("id", id).eq("user_id", state.session.user.id);
     if (error) {
       setLoading(false);
       showToast("删除失败，请检查网络后重试", "error");
       return;
     }
     state.records = state.records.filter((item) => item.id !== id);
+    if (state.editingRecordId === id) cancelRecordEdit();
     if (!state.formDirty) setDefaultDates();
     render();
     setLoading(false);
@@ -1306,6 +1745,7 @@
       roadmap_stages: ROADMAP_STAGES,
       learning_tasks: state.tasks,
       progress_entries: state.records,
+      daily_study_logs: state.dailyLogs,
     };
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1343,13 +1783,18 @@
     $("signOut").addEventListener("click", signOut);
     $("fontScale").addEventListener("click", toggleFontScale);
     $("export").addEventListener("click", exportRecords);
-    $("form").addEventListener("input", () => { state.formDirty = true; });
+    $("form").addEventListener("input", () => {
+      state.formDirty = true;
+      saveRecordDraft();
+    });
+    $("recordFiles").addEventListener("change", renderSelectedFiles);
+    $("cancelRecordEdit").addEventListener("click", () => cancelRecordEdit());
     $("form").addEventListener("submit", async (event) => {
       event.preventDefault();
       try { await createRecord(event.currentTarget); } catch { /* surfaced in toast */ }
     });
     window.addEventListener("beforeunload", (event) => {
-      if (!state.formDirty) return;
+      if (!state.formDirty && !state.dailyFormDirty) return;
       event.preventDefault();
       event.returnValue = "";
     });
@@ -1358,7 +1803,35 @@
       if (!button || state.loading) return;
       if (button.dataset.cloudAction === "toggle") await toggleRecord(button.dataset.id);
       if (button.dataset.cloudAction === "delete") await deleteRecord(button);
+      if (button.dataset.cloudAction === "edit") startRecordEdit(button.dataset.id);
+      if (button.dataset.cloudAction === "open-attachment") await openAttachment(button.dataset.attachmentPath);
     });
+    $("currentAttachmentList").addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-current-attachment-action]");
+      if (!button) return;
+      if (button.dataset.currentAttachmentAction === "open") await openAttachment(button.dataset.path);
+      if (button.dataset.currentAttachmentAction === "remove") await deleteAttachment(button.dataset.id, button.dataset.path);
+    });
+    $("dailyLogForm").addEventListener("input", () => {
+      state.dailyFormDirty = true;
+      saveDailyDraft();
+    });
+    $("dailyLogForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await saveDailyLog(event.currentTarget);
+    });
+    $("cancelDailyEdit").addEventListener("click", cancelDailyEdit);
+    $("dailyLogList").addEventListener("click", async (event) => {
+      const button = event.target.closest("button[data-daily-action]");
+      if (!button) return;
+      if (button.dataset.dailyAction === "edit") editDailyLog(button.dataset.id);
+      if (button.dataset.dailyAction === "delete") await deleteDailyLog(button.dataset.id);
+    });
+    window.addEventListener("online", () => {
+      updateConnectionState();
+      showToast("网络已恢复，可以同步本地草稿");
+    });
+    window.addEventListener("offline", updateConnectionState);
     const handleTaskAction = async (event) => {
       const evidence = event.target.closest("button[data-evidence-task-key]");
       if (evidence) {
@@ -1393,6 +1866,9 @@
     bindEvents();
     applyFontScale(localStorage.getItem(FONT_SCALE_KEY) === "xl");
     setDefaultDates();
+    $("studyDate").value = getShanghaiDateString();
+    updateConnectionState();
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
     if (!window.supabase || !config.url || !config.publishableKey) {
       setAuthMessage("云端服务尚未完成配置，请稍后再试。", "error");
       return;
